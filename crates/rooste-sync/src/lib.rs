@@ -403,6 +403,71 @@ mod tests {
         assert_eq!(dev_b.list_profiles().unwrap().len(), 1);
     }
 
+    #[tokio::test]
+    async fn delete_profile_propagates_tombstone_across_devices() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let remote = MemoryBackend::new();
+        let engine = SyncEngine::fast_for_tests();
+
+        let mut dev_a = new_store(&dir_a);
+        dev_a.initialize("pw-del-sync").unwrap();
+        let keep_p = Profile {
+            name: "sz-aliyun".into(),
+            host: "1.2.3.4".into(),
+            ..Profile::default()
+        };
+        let drop_p = Profile {
+            name: "sz-aliyun (conflict - 2026-11-18)".into(),
+            host: "1.2.3.4".into(),
+            ..Profile::default()
+        };
+        dev_a.save_profile(&keep_p).unwrap();
+        dev_a.save_profile(&drop_p).unwrap();
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+
+        // Device B (Windows) recovers both profiles.
+        let mut dev_b = new_store(&dir_b);
+        let snap = engine.inspect_remote(&remote).await.unwrap();
+        let dek = snap.header.unlock_with_password("pw-del-sync").unwrap();
+        engine
+            .recover_from_remote(&mut dev_b, &remote, snap, dek, None, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(dev_b.list_profiles().unwrap().len(), 2);
+
+        // Device A (Mac) deletes the conflict backup profile and syncs.
+        dev_a.delete_profile(&drop_p.id).unwrap();
+        let push_rep = engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+        assert!(!push_rep.up_to_date);
+        assert_eq!(push_rep.pushed, 1);
+        assert!(
+            remote
+                .get_blob(&rooste_vault::RecordKind::Profile.relative_path(&drop_p.id))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // Device B (Windows) syncs and MUST delete the profile locally!
+        let pull_rep = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
+        assert!(!pull_rep.up_to_date);
+        assert_eq!(pull_rep.deleted_local, 1);
+        let remaining = dev_b.list_profiles().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, keep_p.id);
+        assert!(
+            !dev_b
+                .vault_dir()
+                .join(rooste_vault::RecordKind::Profile.relative_path(&drop_p.id))
+                .exists()
+        );
+
+        // Next sync on Device B is cleanly up to date.
+        let noop_rep = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
+        assert!(noop_rep.up_to_date);
+    }
+
     #[test]
     fn github_url_normalization_handles_common_forms() {
         assert_eq!(

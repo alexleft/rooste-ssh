@@ -390,7 +390,9 @@ impl SyncEngine {
         let mut merged_entries: BTreeMap<String, ManifestEntry> = BTreeMap::new();
         let mut to_pull: Vec<ManifestEntry> = Vec::new();
         let mut to_push: Vec<ManifestEntry> = Vec::new();
+        let mut to_push_tombstones: Vec<ManifestEntry> = Vec::new();
         let mut to_delete_local: Vec<ManifestEntry> = Vec::new();
+        let mut to_delete_remote: Vec<String> = Vec::new();
         let mut conflict_forks: Vec<(ManifestEntry, bool /* winner_is_remote */)> = Vec::new();
 
         let all_keys: std::collections::BTreeSet<String> = local_manifest
@@ -407,7 +409,9 @@ impl SyncEngine {
             ) {
                 (Some(local), None) => {
                     merged_entries.insert(key, local.clone());
-                    if !local.deleted {
+                    if local.deleted {
+                        to_push_tombstones.push(local.clone());
+                    } else {
                         to_push.push(local.clone());
                     }
                 }
@@ -424,7 +428,16 @@ impl SyncEngine {
                         } else {
                             local.clone()
                         };
-                        merged_entries.insert(key, keep);
+                        merged_entries.insert(key, keep.clone());
+                        // Self-heal if an active record's local `.enc` blob is missing on disk.
+                        if !keep.deleted
+                            && !store
+                                .vault_dir()
+                                .join(keep.kind.relative_path(&keep.id))
+                                .exists()
+                        {
+                            to_pull.push(keep);
+                        }
                         continue;
                     }
 
@@ -446,7 +459,12 @@ impl SyncEngine {
                     // 2. True three-way fast-forward: remote untouched since last sync -> push local.
                     if base_marker == Some(remote_marker.as_str()) {
                         merged_entries.insert(key, local.clone());
-                        if !local.deleted {
+                        if local.deleted {
+                            to_push_tombstones.push(local.clone());
+                            if !remote.deleted {
+                                to_delete_remote.push(local.kind.relative_path(&local.id));
+                            }
+                        } else {
                             to_push.push(local.clone());
                         }
                         continue;
@@ -464,7 +482,12 @@ impl SyncEngine {
                     }
                     if local.prev_hash == Some(remote.rev_hash) {
                         merged_entries.insert(key, local.clone());
-                        if !local.deleted {
+                        if local.deleted {
+                            to_push_tombstones.push(local.clone());
+                            if !remote.deleted {
+                                to_delete_remote.push(local.kind.relative_path(&local.id));
+                            }
+                        } else {
                             to_push.push(local.clone());
                         }
                         continue;
@@ -473,10 +496,14 @@ impl SyncEngine {
                     // 4. Legacy / authorship fast-forward when `last_synced_entries` has no base
                     //    entry yet: if local never authored its current copy and remote has a
                     //    strictly higher revision, local has not diverged.
-                    if base_marker.is_none() && !local.deleted && !remote.deleted {
+                    if base_marker.is_none() && !local.deleted {
                         if local.updated_by != my_device_id && remote.revision > local.revision {
                             merged_entries.insert(key, remote.clone());
-                            to_pull.push(remote.clone());
+                            if remote.deleted {
+                                to_delete_local.push(remote.clone());
+                            } else {
+                                to_pull.push(remote.clone());
+                            }
                             continue;
                         }
                         if local.updated_by == my_device_id
@@ -485,7 +512,11 @@ impl SyncEngine {
                         {
                             if remote.revision > local.revision {
                                 merged_entries.insert(key, remote.clone());
-                                to_pull.push(remote.clone());
+                                if remote.deleted {
+                                    to_delete_local.push(remote.clone());
+                                } else {
+                                    to_pull.push(remote.clone());
+                                }
                             } else {
                                 merged_entries.insert(key, local.clone());
                                 to_push.push(local.clone());
@@ -512,7 +543,12 @@ impl SyncEngine {
                         if !local.deleted && !remote.deleted && remote.kind == RecordKind::Profile {
                             conflict_forks.push((remote.clone(), false));
                         }
-                        if !local.deleted {
+                        if local.deleted {
+                            to_push_tombstones.push(local.clone());
+                            if !remote.deleted {
+                                to_delete_remote.push(local.kind.relative_path(&local.id));
+                            }
+                        } else {
                             to_push.push(local.clone());
                         }
                     }
@@ -636,8 +672,11 @@ impl SyncEngine {
 
         let has_remote_writes = need_push_header
             || !to_push.is_empty()
+            || !to_push_tombstones.is_empty()
+            || !to_delete_remote.is_empty()
             || !pruned_paths.is_empty()
-            || !conflicts.is_empty();
+            || !conflicts.is_empty()
+            || merged_manifest.entries != remote_manifest.entries;
 
         // If we only pulled and nothing needs pushing, simply persist remote manifest & return.
         if !has_remote_writes {
@@ -684,16 +723,29 @@ impl SyncEngine {
             }
         }
 
+        let mut all_remote_deletes: Vec<String> = Vec::new();
+        for p in pruned_paths.iter().chain(to_delete_remote.iter()) {
+            if !all_remote_deletes.contains(p) {
+                all_remote_deletes.push(p.clone());
+            }
+        }
+
+        let total_changes = puts.len() + all_remote_deletes.len();
         on_progress(SyncProgress {
-            stage: format!("Pushing {} item(s)…", puts.len()),
+            stage: format!("Pushing {} change(s)…", total_changes.max(1)),
             done: 0,
-            total: puts.len().max(1),
+            total: total_changes.max(1),
         });
 
-        let pushed_count = to_push.len();
-        let pruned_count = pruned_paths.len();
+        let pushed_count = to_push.len() + to_push_tombstones.len();
+        let pruned_count = all_remote_deletes.len();
         backend
-            .commit_batch(puts, pruned_paths, manifest_bytes, remote_etag.as_deref())
+            .commit_batch(
+                puts,
+                all_remote_deletes,
+                manifest_bytes,
+                remote_etag.as_deref(),
+            )
             .await?;
 
         let synced_entries = build_synced_entries(store.manifest());

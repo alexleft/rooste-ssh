@@ -386,12 +386,16 @@ impl SyncBackend for GitHubBackend {
             sha: Some(manifest_blob_sha.clone()),
         });
         for rel in deletes {
-            tree_entries.push(TreeEntry {
-                path: self.full_repo_path(&rel),
-                mode: "100644",
-                kind: "blob",
-                sha: None,
-            });
+            // GitHub's Git Trees API rejects `sha: null` for paths that do not exist in the
+            // base tree; skip any already-removed remote blob cleanly.
+            if self.get_blob(&rel).await?.is_some() {
+                tree_entries.push(TreeEntry {
+                    path: self.full_repo_path(&rel),
+                    mode: "100644",
+                    kind: "blob",
+                    sha: None,
+                });
+            }
         }
 
         // Create Git Tree.

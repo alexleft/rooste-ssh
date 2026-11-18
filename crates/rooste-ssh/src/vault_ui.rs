@@ -3550,6 +3550,11 @@ fn extract_key_fingerprint(label: &str, pem: &str, passphrase: Option<&str>) -> 
 fn format_sync_report(report: &SyncReport) -> String {
     if report.up_to_date {
         format!("Up to date (seq {})", report.manifest_sequence)
+    } else if report.deleted_local > 0 {
+        format!(
+            "Synced: ↓{} ↑{} 🗑{} (seq {})",
+            report.pulled, report.pushed, report.deleted_local, report.manifest_sequence
+        )
     } else {
         format!(
             "Synced: ↓{} ↑{} (seq {})",
