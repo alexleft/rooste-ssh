@@ -4,6 +4,7 @@
 //! (with portable relative-path resolution), auto-lock timeout, and remote sync endpoint
 //! metadata (never credentials; those live encrypted in `local_secrets.enc`).
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -60,6 +61,10 @@ pub struct SyncConfig {
     pub last_synced_manifest_hash: String,
     /// Last synced manifest sequence number.
     pub last_synced_sequence: u64,
+    /// Per-record common-ancestor markers (`"<kind>/<id>" -> rev_hash hex or "deleted:<rev>"`)
+    /// recorded after each successful sync/recovery for true three-way merge.
+    #[serde(default)]
+    pub last_synced_entries: BTreeMap<String, String>,
 }
 
 impl Default for SyncConfig {
@@ -73,6 +78,7 @@ impl Default for SyncConfig {
             auto_sync_interval_secs: 300,
             last_synced_manifest_hash: String::new(),
             last_synced_sequence: 0,
+            last_synced_entries: BTreeMap::new(),
         }
     }
 }

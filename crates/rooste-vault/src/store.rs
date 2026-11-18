@@ -423,8 +423,10 @@ impl VaultStore {
     pub fn save_profile(&mut self, profile: &Profile) -> Result<(), VaultError> {
         let bytes =
             serde_json::to_vec(profile).map_err(|e| VaultError::Serialization(e.to_string()))?;
-        self.write_encrypted_record(RecordKind::Profile, &profile.id, &bytes)?;
-        self.save_manifest()
+        if self.write_encrypted_record_if_changed(RecordKind::Profile, &profile.id, &bytes)? {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     pub fn load_profile(&self, id: &str) -> Result<Option<Profile>, VaultError> {
@@ -475,8 +477,10 @@ impl VaultStore {
         let bytes = Zeroizing::new(
             serde_json::to_vec(&record).map_err(|e| VaultError::Serialization(e.to_string()))?,
         );
-        self.write_encrypted_record(RecordKind::Password, profile_id, &bytes)?;
-        self.save_manifest()
+        if self.write_encrypted_record_if_changed(RecordKind::Password, profile_id, &bytes)? {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     pub fn load_password(&self, profile_id: &str) -> Result<Option<VaultPassword>, VaultError> {
@@ -541,8 +545,10 @@ impl VaultStore {
         let bytes = Zeroizing::new(
             serde_json::to_vec(key).map_err(|e| VaultError::Serialization(e.to_string()))?,
         );
-        self.write_encrypted_record(RecordKind::SshKey, &key.sha256, &bytes)?;
-        self.save_manifest()
+        if self.write_encrypted_record_if_changed(RecordKind::SshKey, &key.sha256, &bytes)? {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     pub fn load_ssh_key(&self, sha256: &str) -> Result<Option<VaultSshKey>, VaultError> {
@@ -581,8 +587,10 @@ impl VaultStore {
     pub fn save_script(&mut self, script: &VaultScript) -> Result<(), VaultError> {
         let bytes =
             serde_json::to_vec(script).map_err(|e| VaultError::Serialization(e.to_string()))?;
-        self.write_encrypted_record(RecordKind::Script, &script.id, &bytes)?;
-        self.save_manifest()
+        if self.write_encrypted_record_if_changed(RecordKind::Script, &script.id, &bytes)? {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     pub fn load_script(&self, id: &str) -> Result<Option<VaultScript>, VaultError> {
@@ -615,8 +623,10 @@ impl VaultStore {
 
     pub fn save_known_hosts(&mut self, kh: &VaultKnownHosts) -> Result<(), VaultError> {
         let bytes = serde_json::to_vec(kh).map_err(|e| VaultError::Serialization(e.to_string()))?;
-        self.write_encrypted_record(RecordKind::KnownHosts, "known_hosts", &bytes)?;
-        self.save_manifest()
+        if self.write_encrypted_record_if_changed(RecordKind::KnownHosts, "known_hosts", &bytes)? {
+            self.save_manifest()?;
+        }
+        Ok(())
     }
 
     pub fn load_known_hosts(&self) -> Result<VaultKnownHosts, VaultError> {
@@ -669,6 +679,18 @@ impl VaultStore {
         self.save_manifest()?;
         let raw = self.read_raw_blob("manifest.enc")?.unwrap_or_default();
         Ok(sha256_hex(&raw))
+    }
+
+    /// Replace the in-memory manifest and on-disk `manifest.enc` with exact remote bytes
+    /// (used on pull-only syncs so local manifest hash & sequence stay identical to remote).
+    pub fn replace_manifest_from_remote(
+        &mut self,
+        manifest: VaultManifest,
+        raw_bytes: &[u8],
+    ) -> Result<String, VaultError> {
+        self.write_raw_blob("manifest.enc", raw_bytes)?;
+        self.manifest = manifest;
+        Ok(sha256_hex(raw_bytes))
     }
 
     /// Compute SHA-256 hex of the on-disk `vault/manifest.enc` bytes.
@@ -806,6 +828,30 @@ impl VaultStore {
 
     fn record_path(&self, kind: RecordKind, id: &str) -> PathBuf {
         self.vault_dir().join(kind.relative_path(id))
+    }
+
+    /// Write an encrypted record only if it does not yet exist, is currently marked deleted,
+    /// or its plaintext differs from the currently stored active record.
+    ///
+    /// Returns `Ok(true)` if a new revision was written, or `Ok(false)` on a no-op save
+    /// (preventing spurious revision increments and false sync conflicts).
+    fn write_encrypted_record_if_changed(
+        &mut self,
+        kind: RecordKind,
+        id: &str,
+        plaintext: &[u8],
+    ) -> Result<bool, VaultError> {
+        let _ = self.dek()?;
+        let mkey = kind.manifest_key(id);
+        if let Some(existing) = self.manifest.entries.get(&mkey)
+            && !existing.deleted
+            && let Ok(Some(current_plain)) = self.read_encrypted_record(kind, id)
+            && current_plain.as_slice() == plaintext
+        {
+            return Ok(false);
+        }
+        self.write_encrypted_record(kind, id, plaintext)?;
+        Ok(true)
     }
 
     fn write_encrypted_record(

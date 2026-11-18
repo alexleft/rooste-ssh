@@ -273,6 +273,7 @@ impl SyncFormState {
             auto_sync_interval_secs: self.auto_sync_interval_secs,
             last_synced_manifest_hash: existing.last_synced_manifest_hash.clone(),
             last_synced_sequence: existing.last_synced_sequence,
+            last_synced_entries: existing.last_synced_entries.clone(),
         }
     }
 

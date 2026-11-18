@@ -272,6 +272,7 @@ impl SyncEngine {
         };
         store.local_config_mut().sync.last_synced_manifest_hash = manifest_hash;
         store.local_config_mut().sync.last_synced_sequence = manifest.sequence;
+        store.local_config_mut().sync.last_synced_entries = build_synced_entries(&manifest);
         store.save_local_config()?;
 
         on_progress(SyncProgress {
@@ -381,8 +382,11 @@ impl SyncEngine {
         };
 
         let local_manifest = store.manifest().clone();
+        let base_entries = store.local_config().sync.last_synced_entries.clone();
+        let my_device_id = store.local_config().device_id.clone();
 
-        // Three-way merge on logical revisions & hashes.
+        // Three-way merge on per-record common ancestor (`last_synced_entries`), logical
+        // revisions, and hashes.
         let mut merged_entries: BTreeMap<String, ManifestEntry> = BTreeMap::new();
         let mut to_pull: Vec<ManifestEntry> = Vec::new();
         let mut to_push: Vec<ManifestEntry> = Vec::new();
@@ -424,8 +428,12 @@ impl SyncEngine {
                         continue;
                     }
 
-                    // Clean fast-forward from local -> remote.
-                    if remote.prev_hash == Some(local.rev_hash) {
+                    let local_marker = synced_entry_marker(local);
+                    let remote_marker = synced_entry_marker(remote);
+                    let base_marker = base_entries.get(&key).map(String::as_str);
+
+                    // 1. True three-way fast-forward: local untouched since last sync -> take remote.
+                    if base_marker == Some(local_marker.as_str()) {
                         merged_entries.insert(key, remote.clone());
                         if remote.deleted {
                             to_delete_local.push(remote.clone());
@@ -435,7 +443,25 @@ impl SyncEngine {
                         continue;
                     }
 
-                    // Clean fast-forward from remote -> local.
+                    // 2. True three-way fast-forward: remote untouched since last sync -> push local.
+                    if base_marker == Some(remote_marker.as_str()) {
+                        merged_entries.insert(key, local.clone());
+                        if !local.deleted {
+                            to_push.push(local.clone());
+                        }
+                        continue;
+                    }
+
+                    // 3. Direct parent hash fast-forward (single-hop fallback).
+                    if remote.prev_hash == Some(local.rev_hash) {
+                        merged_entries.insert(key, remote.clone());
+                        if remote.deleted {
+                            to_delete_local.push(remote.clone());
+                        } else {
+                            to_pull.push(remote.clone());
+                        }
+                        continue;
+                    }
                     if local.prev_hash == Some(remote.rev_hash) {
                         merged_entries.insert(key, local.clone());
                         if !local.deleted {
@@ -444,7 +470,32 @@ impl SyncEngine {
                         continue;
                     }
 
-                    // Concurrent divergence! Resolve deterministically by logical (revision, updated_at, updated_by).
+                    // 4. Legacy / authorship fast-forward when `last_synced_entries` has no base
+                    //    entry yet: if local never authored its current copy and remote has a
+                    //    strictly higher revision, local has not diverged.
+                    if base_marker.is_none() && !local.deleted && !remote.deleted {
+                        if local.updated_by != my_device_id && remote.revision > local.revision {
+                            merged_entries.insert(key, remote.clone());
+                            to_pull.push(remote.clone());
+                            continue;
+                        }
+                        if local.updated_by == my_device_id
+                            && remote.updated_by == my_device_id
+                            && local.revision != remote.revision
+                        {
+                            if remote.revision > local.revision {
+                                merged_entries.insert(key, remote.clone());
+                                to_pull.push(remote.clone());
+                            } else {
+                                merged_entries.insert(key, local.clone());
+                                to_push.push(local.clone());
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 5. True concurrent divergence! Resolve deterministically by
+                    //    (revision, updated_at, updated_by).
                     let remote_wins = compare_entries(remote, local) == Ordering::Greater;
                     if remote_wins {
                         merged_entries.insert(key, remote.clone());
@@ -474,6 +525,7 @@ impl SyncEngine {
         to_pull.sort_by_key(|e| e.kind.dependency_order());
         let pull_total = to_pull.len();
         let mut staged_pulls: Vec<(ManifestEntry, Vec<u8>)> = Vec::with_capacity(pull_total);
+        let mut staged_pull_profiles: BTreeMap<String, Profile> = BTreeMap::new();
         let mut staged_key_shas = std::collections::HashSet::new();
 
         for (idx, entry) in to_pull.iter().enumerate() {
@@ -508,21 +560,26 @@ impl SyncEngine {
                             )));
                         }
                     }
+                    staged_pull_profiles.insert(entry.id.clone(), profile);
                 }
                 _ => {}
             }
             staged_pulls.push((entry.clone(), bytes));
         }
 
-        // Handle profile conflict forks BEFORE overwriting local files so loser data is preserved!
+        // Handle profile conflict forks BEFORE overwriting local files so loser data is preserved,
+        // suppressing redundant backups whenever winner and loser have identical content!
         let mut conflicts = Vec::new();
         let date_tag = Utc::now().format("%Y-%m-%d").to_string();
         for (loser_entry, winner_is_remote) in conflict_forks {
-            let loser_profile_opt = if winner_is_remote {
-                store.load_profile(&loser_entry.id)?
+            let (winner_profile_opt, loser_profile_opt) = if winner_is_remote {
+                let winner = staged_pull_profiles.get(&loser_entry.id).cloned();
+                let loser = store.load_profile(&loser_entry.id)?;
+                (winner, loser)
             } else {
+                let winner = store.load_profile(&loser_entry.id)?;
                 let rel = RecordKind::Profile.relative_path(&loser_entry.id);
-                if let Some((bytes, _)) = backend.get_blob(&rel).await? {
+                let loser = if let Some((bytes, _)) = backend.get_blob(&rel).await? {
                     let (_, plain) = store.decrypt_external_record(
                         RecordKind::Profile,
                         &loser_entry.id,
@@ -531,13 +588,18 @@ impl SyncEngine {
                     serde_json::from_slice::<Profile>(&plain).ok()
                 } else {
                     None
-                }
+                };
+                (winner, loser)
             };
             if let Some(mut backup_profile) = loser_profile_opt {
+                if winner_profile_opt.as_ref() == Some(&backup_profile) {
+                    // Both devices produced identical profile content; no data would be lost.
+                    continue;
+                }
                 let original_id = backup_profile.id.clone();
+                let base_name = strip_conflict_suffix(&backup_profile.display_name()).to_owned();
                 backup_profile.id = rooste_core::profile::new_id();
-                backup_profile.name =
-                    format!("{} (冲突备份 - {date_tag})", backup_profile.display_name());
+                backup_profile.name = format!("{base_name} (conflict - {date_tag})");
                 let backup_id = backup_profile.id.clone();
                 let backup_name = backup_profile.name.clone();
                 store.save_profile(&backup_profile)?;
@@ -580,13 +642,12 @@ impl SyncEngine {
         // If we only pulled and nothing needs pushing, simply persist remote manifest & return.
         if !has_remote_writes {
             if let Some((ref remote_bytes, _)) = remote_manifest_opt {
-                store.write_raw_blob("manifest.enc", remote_bytes)?;
-                let hash = sha256_hex(remote_bytes);
-                let _ = store.set_manifest_and_save(merged_manifest.clone());
-                // Keep exact remote manifest bytes so hash matches remote without needless churn.
-                store.write_raw_blob("manifest.enc", remote_bytes)?;
+                let hash =
+                    store.replace_manifest_from_remote(remote_manifest.clone(), remote_bytes)?;
                 store.local_config_mut().sync.last_synced_manifest_hash = hash;
                 store.local_config_mut().sync.last_synced_sequence = remote_manifest.sequence;
+                store.local_config_mut().sync.last_synced_entries =
+                    build_synced_entries(&remote_manifest);
                 store.save_local_config()?;
             }
             return Ok(SyncReport {
@@ -635,8 +696,11 @@ impl SyncEngine {
             .commit_batch(puts, pruned_paths, manifest_bytes, remote_etag.as_deref())
             .await?;
 
+        let synced_entries = build_synced_entries(store.manifest());
+        let synced_seq = store.manifest().sequence;
         store.local_config_mut().sync.last_synced_manifest_hash = new_manifest_hash;
-        store.local_config_mut().sync.last_synced_sequence = store.manifest().sequence;
+        store.local_config_mut().sync.last_synced_sequence = synced_seq;
+        store.local_config_mut().sync.last_synced_entries = synced_entries;
         store.save_local_config()?;
 
         Ok(SyncReport {
@@ -647,9 +711,37 @@ impl SyncEngine {
             retries: 0,
             up_to_date: false,
             conflicts,
-            manifest_sequence: store.manifest().sequence,
+            manifest_sequence: synced_seq,
         })
     }
+}
+
+fn synced_entry_marker(entry: &ManifestEntry) -> String {
+    if entry.deleted {
+        format!("deleted:{}", entry.revision)
+    } else {
+        hex::encode(entry.rev_hash)
+    }
+}
+
+fn build_synced_entries(manifest: &VaultManifest) -> BTreeMap<String, String> {
+    manifest
+        .entries
+        .iter()
+        .map(|(k, v)| (k.clone(), synced_entry_marker(v)))
+        .collect()
+}
+
+/// Strip an existing trailing conflict suffix so conflict backups never nest repeatedly.
+fn strip_conflict_suffix(name: &str) -> &str {
+    for marker in [" (conflict - ", " (冲突备份 - "] {
+        if let Some(idx) = name.rfind(marker)
+            && name.ends_with(')')
+        {
+            return name[..idx].trim_end();
+        }
+    }
+    name
 }
 
 /// Deterministic conflict winner ordering:

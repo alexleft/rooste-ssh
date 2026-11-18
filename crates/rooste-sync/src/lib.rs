@@ -151,7 +151,7 @@ mod tests {
         let report = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
         assert_eq!(report.conflicts.len(), 1);
         assert!(report.conflicts[0].winner_is_remote);
-        assert!(report.conflicts[0].backup_name.contains("冲突备份"));
+        assert!(report.conflicts[0].backup_name.contains("conflict"));
 
         let winner = dev_b.load_profile(&profile.id).unwrap().unwrap();
         assert_eq!(winner.notes, "A edit 2 (rev 3)");
@@ -293,6 +293,114 @@ mod tests {
         // Verify new password works on re-open.
         dev.lock();
         dev.unlock_with_password("pw-reset-new").unwrap();
+    }
+
+    #[tokio::test]
+    async fn multi_edit_fast_forward_never_creates_false_conflict() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let remote = MemoryBackend::new();
+        let engine = SyncEngine::fast_for_tests();
+
+        let mut dev_a = new_store(&dir_a);
+        dev_a.initialize("pw-sync-ff").unwrap();
+        let mut profile = Profile {
+            name: "sz-aliyun".into(),
+            host: "1.2.3.4".into(),
+            ..Profile::default()
+        };
+        dev_a.save_profile(&profile).unwrap();
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+
+        // Device B (Windows) recovers at revision 1 and never edits `sz-aliyun`.
+        let mut dev_b = new_store(&dir_b);
+        let snap = engine.inspect_remote(&remote).await.unwrap();
+        let dek = snap.header.unlock_with_password("pw-sync-ff").unwrap();
+        engine
+            .recover_from_remote(&mut dev_b, &remote, snap, dek, None, None, |_| {})
+            .await
+            .unwrap();
+
+        // Device A edits `sz-aliyun` 3 times before Device B syncs (rev 1 -> 2 -> 3 -> 4).
+        for i in 2..=4 {
+            profile.notes = format!("edit {i}");
+            dev_a.save_profile(&profile).unwrap();
+        }
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+
+        // Device B syncs: must cleanly fast-forward with ZERO conflict backups!
+        let report = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
+        assert!(report.conflicts.is_empty());
+        assert_eq!(report.pulled, 1);
+        assert_eq!(report.pushed, 0);
+        assert_eq!(dev_b.list_profiles().unwrap().len(), 1);
+        assert_eq!(
+            dev_b.load_profile(&profile.id).unwrap().unwrap().notes,
+            "edit 4"
+        );
+
+        // Also test legacy upgrade path (empty `last_synced_entries` on Device B) after 2 more edits on A.
+        dev_b.local_config_mut().sync.last_synced_entries.clear();
+        for i in 5..=6 {
+            profile.notes = format!("edit {i}");
+            dev_a.save_profile(&profile).unwrap();
+        }
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+        let report2 = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
+        assert!(report2.conflicts.is_empty());
+        assert_eq!(dev_b.list_profiles().unwrap().len(), 1);
+        assert_eq!(
+            dev_b.load_profile(&profile.id).unwrap().unwrap().notes,
+            "edit 6"
+        );
+    }
+
+    #[tokio::test]
+    async fn noop_save_and_identical_concurrent_edits_never_create_conflict() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let remote = MemoryBackend::new();
+        let engine = SyncEngine::fast_for_tests();
+
+        let mut dev_a = new_store(&dir_a);
+        dev_a.initialize("pw-sync-noop").unwrap();
+        let mut profile = Profile {
+            name: "sz-aliyun".into(),
+            host: "1.2.3.4".into(),
+            ..Profile::default()
+        };
+        dev_a.save_profile(&profile).unwrap();
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+
+        let mut dev_b = new_store(&dir_b);
+        let snap = engine.inspect_remote(&remote).await.unwrap();
+        let dek = snap.header.unlock_with_password("pw-sync-noop").unwrap();
+        engine
+            .recover_from_remote(&mut dev_b, &remote, snap, dek, None, None, |_| {})
+            .await
+            .unwrap();
+
+        // 1. No-op save on Device B must NOT bump revision or dirty the manifest.
+        let mkey = rooste_vault::RecordKind::Profile.manifest_key(&profile.id);
+        let before_rev = dev_b.manifest().entries[&mkey].revision;
+        let unchanged = dev_b.load_profile(&profile.id).unwrap().unwrap();
+        dev_b.save_profile(&unchanged).unwrap();
+        let after_rev = dev_b.manifest().entries[&mkey].revision;
+        assert_eq!(before_rev, after_rev);
+
+        // 2. Both devices independently make the exact same edit offline.
+        profile.allow_legacy = true;
+        dev_a.save_profile(&profile).unwrap();
+        engine.sync(&mut dev_a, &remote, |_| {}).await.unwrap();
+
+        let mut prof_b = dev_b.load_profile(&profile.id).unwrap().unwrap();
+        prof_b.allow_legacy = true;
+        dev_b.save_profile(&prof_b).unwrap();
+
+        // Syncing must detect identical decrypted content and create ZERO conflict backup!
+        let report = engine.sync(&mut dev_b, &remote, |_| {}).await.unwrap();
+        assert!(report.conflicts.is_empty());
+        assert_eq!(dev_b.list_profiles().unwrap().len(), 1);
     }
 
     #[test]
