@@ -29,13 +29,16 @@ rooste-core.workspace = true
 rooste-keys.workspace = true
 rooste-protocols.workspace = true
 rooste-sftp.workspace = true
+rooste-sync.workspace = true
 rooste-terminal.workspace = true
 rooste-tmux.workspace = true
+rooste-vault.workspace = true
 rfd.workspace = true
 rhai.workspace = true
 serde.workspace = true
 tokio.workspace = true
 ureq.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 rooste-keys.workspace = true

@@ -19,8 +19,10 @@ crossterm.workspace = true
 futures.workspace = true
 rooste-core.workspace = true
 rooste-protocols.workspace = true
+rooste-vault.workspace = true
 rpassword.workspace = true
 tokio.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 rooste-terminal.workspace = true

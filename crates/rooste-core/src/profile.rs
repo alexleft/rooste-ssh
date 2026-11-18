@@ -23,8 +23,10 @@ pub struct Profile {
     pub port: Option<u16>,
     pub user: String,
     pub key_file: Option<PathBuf>,
+    /// Managed Vault SSH key SHA-256 hex digest (`vault/keys/<sha256>.enc`).
+    pub key_sha256: Option<String>,
     pub use_agent: bool,
-    /// A password for this profile is kept in the OS credential store.
+    /// A password for this profile is kept in the vault (or legacy credential store).
     pub save_password: bool,
     /// Offer outdated algorithms for old devices.
     pub allow_legacy: bool,
@@ -41,6 +43,8 @@ pub struct Profile {
     /// A script (file name in the scripts folder) to run once connected;
     /// empty for none.
     pub on_connect_script: String,
+    /// Managed Vault Rhai script UUID (`vault/scripts/<script_id>.enc`).
+    pub on_connect_script_id: Option<String>,
     /// Port forwards started with the session.
     pub tunnels: Vec<Tunnel>,
     /// Line settings for serial profiles (the port name is in `host`).
@@ -208,6 +212,7 @@ impl Default for Profile {
             port: None,
             user: String::new(),
             key_file: None,
+            key_sha256: None,
             use_agent: true,
             save_password: false,
             allow_legacy: false,
@@ -217,6 +222,7 @@ impl Default for Profile {
             tmux_auto_attach: false,
             tmux_session_name: String::new(),
             on_connect_script: String::new(),
+            on_connect_script_id: None,
             tunnels: Vec::new(),
             serial: SerialSettings::default(),
             notes: String::new(),

@@ -27,6 +27,12 @@ pub enum PickId {
     SessionLog,
     /// "Record session…" for a tab.
     SessionRecording,
+    /// Vault Keys Manager: choose a local private key to import.
+    VaultKeyImport,
+    /// Vault Keys Manager: export a managed private key to a file.
+    VaultKeyExportPrivate,
+    /// Vault Keys Manager: export a managed public key (.pub) to a file.
+    VaultKeyExportPublic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +182,9 @@ fn start_dir(current: &str, id: PickId) -> Option<PathBuf> {
                 | PickId::ConvertInput
                 | PickId::ConvertOutput
                 | PickId::AgentKeyFile
+                | PickId::VaultKeyImport
+                | PickId::VaultKeyExportPrivate
+                | PickId::VaultKeyExportPublic
         );
         Some(if key_file && ssh.is_dir() { ssh } else { home })
     })

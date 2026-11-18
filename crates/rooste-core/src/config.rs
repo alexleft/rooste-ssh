@@ -261,6 +261,55 @@ impl ConfigLocation {
             portable: true,
         })
     }
+
+    /// Construct a `ConfigLocation` anchored at `root_dir`.
+    pub fn for_root(root_dir: PathBuf, portable: bool) -> Self {
+        let name = if portable {
+            PORTABLE_FILE_NAME
+        } else {
+            FILE_NAME
+        };
+        Self {
+            path: root_dir.join(name),
+            portable,
+        }
+    }
+
+    /// Root directory (`<ROOSTE_ROOT>`) containing `config.toml`, `local.toml`,
+    /// `local_secrets.enc`, and `vault/`.
+    pub fn root_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_owned)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    /// Machine-local runtime state file (`<ROOSTE_ROOT>/local.toml`), excluded from sync.
+    pub fn local_path(&self) -> PathBuf {
+        self.root_dir().join(crate::local::LOCAL_FILE_NAME)
+    }
+
+    /// DEK-encrypted local sync credentials file (`<ROOSTE_ROOT>/local_secrets.enc`),
+    /// excluded from sync.
+    pub fn local_secrets_path(&self) -> PathBuf {
+        self.root_dir().join(crate::local::LOCAL_SECRETS_FILE_NAME)
+    }
+
+    /// End-to-end encrypted vault root directory (`<ROOSTE_ROOT>/vault`).
+    pub fn vault_dir(&self) -> PathBuf {
+        self.root_dir().join("vault")
+    }
+}
+
+/// Copy a legacy `config.toml` (with plaintext profiles) to `config.toml.legacy.bak`
+/// before rewriting the stripped settings-only config.
+pub fn backup_legacy_config(path: &Path) -> io::Result<PathBuf> {
+    let bak = path.with_extension("toml.legacy.bak");
+    if path.exists() {
+        std::fs::copy(path, &bak)?;
+    }
+    Ok(bak)
 }
 
 #[cfg(test)]

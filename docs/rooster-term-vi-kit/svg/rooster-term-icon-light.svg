@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="crestGradL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6B35"/>
+      <stop offset="100%" stop-color="#FFB800"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="#F4F6F9" stroke="#DCE2EC" stroke-width="4"/>
+  <path d="M126 184 L196 254 L126 324" fill="none" stroke="url(#crestGradL)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="154,152 266,184 222,226" fill="#FF6B35"/>
+  <polygon points="224,132 308,184 266,184" fill="#FF8E2B"/>
+  <polygon points="292,152 332,222 266,184" fill="#FFB800"/>
+  <polygon points="222,226 266,184 316,246 196,356 156,346" fill="#1C2230"/>
+  <polygon points="266,184 316,246 278,392 196,356" fill="#12161F"/>
+  <polygon points="274,202 318,228 310,244" fill="#FFB800"/>
+  <polygon points="324,234 374,254 320,266" fill="#FFB800"/>
+  <polygon points="316,268 338,318 308,338 286,312" fill="#FF6B35"/>
+  <rect x="318" y="352" width="76" height="18" rx="4" fill="#0284C7"/>
+</svg>

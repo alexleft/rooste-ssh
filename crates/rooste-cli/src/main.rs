@@ -3,6 +3,7 @@
 mod auth;
 mod forwards;
 mod interactive;
+mod vault;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -24,8 +25,16 @@ const EXIT_ERROR: u8 = 255;
 #[derive(Debug, Parser)]
 #[command(version, about = "Headless Rooste SSH client")]
 struct Args {
-    #[arg(help = "Server to connect to: [user@]host[:port]")]
-    destination: String,
+    #[arg(help = "Server to connect to: [user@]host[:port] (omit when using --profile)")]
+    destination: Option<String>,
+
+    /// Connect using a saved profile from the encrypted vault (unlocks via ROOSTE_VAULT_PASSWORD, --vault-password-file, or TTY prompt)
+    #[arg(long, value_name = "NAME")]
+    profile: Option<String>,
+
+    /// Path to a 0600 file containing the vault master password (used with --profile)
+    #[arg(long, value_name = "FILE")]
+    vault_password_file: Option<PathBuf>,
 
     /// Port (overrides a port given in the destination)
     #[arg(short, long)]
@@ -135,14 +144,58 @@ async fn main() {
 }
 
 async fn run(args: Args) -> anyhow::Result<u8> {
-    let dest = Destination::parse(&args.destination)?;
-    let host = dest.host;
-    let port = args.port.or(dest.port).unwrap_or(22);
-    let user = args
-        .user
-        .or(dest.user)
-        .or_else(local_user)
-        .context("no user name given; use user@host or -l")?;
+    let unlocked = if let Some(ref profile_name) = args.profile {
+        Some(vault::load_vault_profile(
+            profile_name,
+            args.vault_password_file.as_deref(),
+        )?)
+    } else {
+        None
+    };
+
+    let (host, port, user, allow_legacy, jump, forward_agent, forward_x11, no_agent) =
+        if let Some(ref u) = unlocked {
+            let p = &u.profile;
+            let user = args
+                .user
+                .clone()
+                .or_else(|| (!p.user.trim().is_empty()).then(|| p.user.clone()))
+                .or_else(local_user)
+                .context("no user name given; configure profile user or pass -l")?;
+            (
+                p.host.clone(),
+                args.port.unwrap_or_else(|| p.effective_port()),
+                user,
+                args.allow_legacy || p.allow_legacy,
+                args.jump.clone().or_else(|| p.proxy_jump.clone()),
+                args.forward_agent || p.forward_agent,
+                args.forward_x11 || p.forward_x11,
+                args.no_agent || !p.use_agent,
+            )
+        } else {
+            let raw_dest = args
+                .destination
+                .as_deref()
+                .context("missing destination; pass [user@]host[:port] or --profile <NAME>")?;
+            let dest = Destination::parse(raw_dest)?;
+            let host = dest.host;
+            let port = args.port.or(dest.port).unwrap_or(22);
+            let user = args
+                .user
+                .or(dest.user)
+                .or_else(local_user)
+                .context("no user name given; use user@host or -l")?;
+            (
+                host,
+                port,
+                user,
+                args.allow_legacy,
+                args.jump.clone(),
+                args.forward_agent,
+                args.forward_x11,
+                args.no_agent,
+            )
+        };
 
     let policy = match args.host_key {
         HostKeyMode::Ask => HostKeyPolicy::Ask(Arc::new(TerminalPrompt)),
@@ -154,19 +207,25 @@ async fn run(args: Args) -> anyhow::Result<u8> {
         if let Some(path) = &args.known_hosts {
             config.known_hosts = path.clone();
         }
-        config.allow_legacy_algorithms = args.allow_legacy;
+        config.allow_legacy_algorithms = allow_legacy;
         config.host_key_policy = policy.clone();
         config
     };
+    let (vault_key, vault_password) = match unlocked {
+        Some(u) => (u.ssh_key, u.password),
+        None => (None, None),
+    };
     let methods = auth::Methods {
-        agent: !args.no_agent,
+        agent: !no_agent,
         identities: args.identities.clone(),
+        vault_key,
+        vault_password,
     };
     let specs = forwards::Specs::parse(&args.local, &args.remote, &args.dynamic)?;
 
     // Each jump host is reached through the previous one.
     let mut previous: Option<SshClient> = None;
-    let hops = match &args.jump {
+    let hops = match &jump {
         Some(jump) => Destination::parse_list(jump)?,
         None => Vec::new(),
     };
@@ -188,8 +247,8 @@ async fn run(args: Args) -> anyhow::Result<u8> {
     auth::authenticate(&mut client, &user, &host, methods).await?;
 
     let _forwards = specs.start(&client).await?;
-    let agent = args.forward_agent.then_some(AgentSource::Default);
-    if args.forward_x11 {
+    let agent = forward_agent.then_some(AgentSource::Default);
+    if forward_x11 {
         match X11Forwarding::from_environment() {
             Ok(forwarding) => client.set_x11_forwarding(forwarding),
             Err(e) => eprintln!("warning: X11 forwarding is off: {e}"),
@@ -293,7 +352,22 @@ mod tests {
         assert_eq!(args.port, Some(2222));
         assert_eq!(args.identities, [PathBuf::from("key")]);
         assert!(matches!(args.host_key, HostKeyMode::AcceptNew));
-        assert_eq!(args.destination, "me@host");
+        assert_eq!(args.destination.as_deref(), Some("me@host"));
         assert_eq!(args.command, ["ls", "-la"]);
+    }
+
+    #[test]
+    fn profile_args_parse() {
+        let args = Args::try_parse_from([
+            "rooste-cli",
+            "--profile",
+            "Prod Bastion",
+            "--vault-password-file",
+            "/tmp/pw",
+        ])
+        .unwrap();
+        assert_eq!(args.profile.as_deref(), Some("Prod Bastion"));
+        assert_eq!(args.vault_password_file, Some(PathBuf::from("/tmp/pw")));
+        assert!(args.destination.is_none());
     }
 }

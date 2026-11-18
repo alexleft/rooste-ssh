@@ -7,8 +7,10 @@ use std::sync::Arc;
 use anyhow::bail;
 use rooste_protocols::ssh::{
     AgentSource, Auth, AuthMethod, InteractiveStep, PrivateKey, SshClient, SshError,
-    load_private_key,
+    load_private_key, load_private_key_from_pem,
 };
+use rooste_vault::VaultSshKey;
+use zeroize::Zeroizing;
 
 const PROMPT_ATTEMPTS: usize = 3;
 const DEFAULT_KEYS: [&str; 3] = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -18,6 +20,10 @@ pub struct Methods {
     pub agent: bool,
     /// Explicit key files; empty means the default keys in `~/.ssh`.
     pub identities: Vec<PathBuf>,
+    /// Managed SSH key decrypted in memory from the encrypted vault.
+    pub vault_key: Option<VaultSshKey>,
+    /// Saved password decrypted in memory from the encrypted vault.
+    pub vault_password: Option<Zeroizing<String>>,
 }
 
 pub async fn authenticate(
@@ -26,6 +32,13 @@ pub async fn authenticate(
     host: &str,
     methods: Methods,
 ) -> anyhow::Result<()> {
+    if let Some(ref vkey) = methods.vault_key
+        && let Some(key) = load_vault_key(vkey).await?
+        && client.authenticate(user, &Auth::PublicKey(key)).await?
+    {
+        return Ok(());
+    }
+
     if methods.agent {
         match client
             .authenticate(user, &Auth::Agent(AgentSource::Default))
@@ -66,6 +79,14 @@ pub async fn authenticate(
     }
     if !offered.contains(&AuthMethod::Password) {
         bail!("permission denied for {user}@{host}");
+    }
+
+    if let Some(ref saved_pw) = methods.vault_password
+        && client
+            .authenticate(user, &Auth::password(saved_pw.as_str().to_owned()))
+            .await?
+    {
+        return Ok(());
     }
 
     for _ in 0..PROMPT_ATTEMPTS {
@@ -130,6 +151,35 @@ fn default_keys() -> Vec<PathBuf> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+async fn load_vault_key(vkey: &VaultSshKey) -> anyhow::Result<Option<Arc<PrivateKey>>> {
+    if !vkey.require_passphrase_prompt {
+        let pass = vkey.passphrase.as_deref().map(String::as_str);
+        match load_private_key_from_pem(&vkey.label, vkey.private_key_pem.as_str(), pass) {
+            Ok(key) => return Ok(Some(Arc::new(key))),
+            Err(SshError::KeyEncrypted(_)) => {}
+            Err(e) => {
+                eprintln!("warning: managed key '{}': {e}", vkey.label);
+                return Ok(None);
+            }
+        }
+    }
+    for _ in 0..PROMPT_ATTEMPTS {
+        let prompt = format!("Enter passphrase for managed vault key '{}': ", vkey.label);
+        let Some(passphrase) = prompt_secret(prompt).await? else {
+            return Ok(None);
+        };
+        match load_private_key_from_pem(
+            &vkey.label,
+            vkey.private_key_pem.as_str(),
+            Some(&passphrase),
+        ) {
+            Ok(key) => return Ok(Some(Arc::new(key))),
+            Err(_) => eprintln!("Bad passphrase, try again."),
+        }
+    }
+    Ok(None)
 }
 
 /// Load a key, asking for its passphrase if it is encrypted. Returns `None`

@@ -11,7 +11,7 @@ use rooste_protocols::Transport;
 use rooste_protocols::ssh::{
     AgentSource, Auth, AuthMethod, Forward, HostKeyPolicy, HostKeyPrompt, InteractiveStep,
     PtyRequest, SshClient, SshConfig, SshError, UnknownHostKey, X11Forwarding, connect,
-    connect_via, load_private_key,
+    connect_via, load_private_key, load_private_key_from_pem,
 };
 use rooste_tmux::{
     DcsDetector, MachineEvent, TmuxClientAction, TmuxMachine, TmuxNotification, TmuxPaneId,
@@ -27,6 +27,12 @@ pub struct ConnectRequest {
     pub user: String,
     pub password: Option<String>,
     pub key_file: Option<PathBuf>,
+    /// Managed Vault SSH key PEM decrypted in memory (zeroized on drop; never touches disk).
+    pub key_pem: Option<zeroize::Zeroizing<String>>,
+    /// Display label of the managed Vault SSH key (shown in passphrase prompt if needed).
+    pub key_label: Option<String>,
+    /// High-security mode: always prompt the user for the key passphrase before connecting.
+    pub require_passphrase_prompt: bool,
     pub key_passphrase: Option<String>,
     pub use_agent: bool,
     pub allow_legacy: bool,
@@ -931,6 +937,29 @@ async fn authenticate(
             Err(e) => return Err(describe(e)),
         }
     }
+    if let Some(pem) = &request.key_pem {
+        let label = request.key_label.as_deref().unwrap_or("vault-ssh-key");
+        let pass = if request.require_passphrase_prompt {
+            None
+        } else {
+            request.key_passphrase.as_deref()
+        };
+        if let Some(key) = load_key_from_pem(
+            label,
+            pem.as_str(),
+            pass,
+            request.require_passphrase_prompt,
+            sink,
+        )
+        .await?
+            && client
+                .authenticate(user, &Auth::PublicKey(Arc::new(key)))
+                .await
+                .map_err(describe)?
+        {
+            return Ok(true);
+        }
+    }
     if let Some(path) = &request.key_file
         && let Some(key) = load_key(path, request.key_passphrase.as_deref(), sink).await?
         && client
@@ -1069,6 +1098,37 @@ async fn try_password(
         .authenticate(user, &Auth::password(password))
         .await
         .map_err(describe)
+}
+
+async fn load_key_from_pem(
+    label: &str,
+    pem: &str,
+    passphrase: Option<&str>,
+    force_prompt: bool,
+    sink: &EventSink,
+) -> Result<Option<rooste_protocols::ssh::PrivateKey>, String> {
+    if !force_prompt {
+        match load_private_key_from_pem(label, pem, passphrase) {
+            Ok(key) => return Ok(Some(key)),
+            Err(SshError::KeyEncrypted(_)) => {}
+            Err(e) if passphrase.is_none() => return Err(describe(e)),
+            Err(_) => {}
+        }
+    }
+    let mut retry = passphrase.is_some();
+    for _ in 0..PROMPT_ATTEMPTS {
+        let kind = PromptKind::Passphrase {
+            key_file: PathBuf::from(label),
+        };
+        let Some(entered) = prompt(sink, kind, retry).await else {
+            return Ok(None);
+        };
+        if let Ok(key) = load_private_key_from_pem(label, pem, Some(&entered)) {
+            return Ok(Some(key));
+        }
+        retry = true;
+    }
+    Ok(None)
 }
 
 /// Load a key, asking for its passphrase if it is encrypted and none was

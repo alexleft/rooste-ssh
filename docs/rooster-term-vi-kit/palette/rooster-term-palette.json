@@ -1,0 +1,74 @@
+{
+  "brand": "rooster-term",
+  "version": "1.0.0",
+  "colors": {
+    "midnight_slate": {
+      "hex": "#12161F",
+      "rgb": [
+        18,
+        22,
+        31
+      ],
+      "role": "Primary terminal background & dark squircle base"
+    },
+    "roost_charcoal": {
+      "hex": "#1C2230",
+      "rgb": [
+        28,
+        34,
+        48
+      ],
+      "role": "Side panels (Session Manager / SFTP) & inactive tabs"
+    },
+    "crest_amber": {
+      "hex": "#FF6B35",
+      "rgb": [
+        255,
+        107,
+        53
+      ],
+      "role": "Primary brand accent, primary action buttons & rooster crest"
+    },
+    "dawn_gold": {
+      "hex": "#FFB800",
+      "rgb": [
+        255,
+        184,
+        0
+      ],
+      "role": "Secondary accent, tmux -CC gateway badge & warnings"
+    },
+    "terminal_cyan": {
+      "hex": "#38BDF8",
+      "rgb": [
+        56,
+        189,
+        248
+      ],
+      "role": "Active tab indicator bar, cursor & prompt highlight"
+    },
+    "nordic_snow": {
+      "hex": "#F4F6F9",
+      "rgb": [
+        244,
+        246,
+        249
+      ],
+      "role": "Light mode surface & dark mode primary foreground text"
+    }
+  },
+  "typography": {
+    "wordmark": "rooster-term",
+    "terminal_font": [
+      "JetBrains Mono",
+      "Cascadia Mono",
+      "ui-monospace"
+    ],
+    "ui_font": [
+      "Inter",
+      "SF Pro",
+      "HarmonyOS Sans",
+      "system-ui"
+    ]
+  }
+}

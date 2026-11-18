@@ -5,6 +5,7 @@
 pub mod config;
 pub mod destination;
 pub mod import;
+pub mod local;
 pub mod profile;
 pub mod secrets;
 
@@ -13,9 +14,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-pub use config::{Config, ConfigLocation, Settings, Theme};
+pub use config::{Config, ConfigLocation, Settings, Theme, backup_legacy_config};
 pub use destination::Destination;
 pub use import::expand_tilde;
+pub use local::{
+    LOCAL_FILE_NAME, LOCAL_SECRETS_FILE_NAME, LocalConfig, SyncBackendKind, SyncConfig,
+    atomic_write_bytes,
+};
 pub use profile::{FlowControl, Parity, Profile, SerialSettings, Tunnel, TunnelKind};
 pub use secrets::{MemoryStore, SecretStore};
 

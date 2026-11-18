@@ -20,15 +20,20 @@ rooste-terminal = { path = "crates/rooste-terminal", version = "=0.5.1" }
 rooste-tmux = { path = "crates/rooste-tmux", version = "=0.5.1" }
 rooste-keys = { path = "crates/rooste-keys", version = "=0.5.1" }
 rooste-sftp = { path = "crates/rooste-sftp", version = "=0.5.1" }
+rooste-vault = { path = "crates/rooste-vault", version = "=0.5.1" }
+rooste-sync = { path = "crates/rooste-sync", version = "=0.5.1" }
 # Test fixtures only; not published.
 rooste-testkit = { path = "crates/rooste-testkit" }
 
+aes-gcm = { version = "0.11.1", default-features = false, features = ["alloc", "zeroize"] }
 alacritty_terminal = { version = "0.26.0", default-features = false }
 aes = "0.9.3"
 anyhow = "1.0.104"
 argon2 = "0.6.0"
 arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+async-trait = "0.1.92"
 base64ct = { version = "1.8.3", features = ["alloc"] }
+bip39 = { version = "3.0.0", features = ["zeroize"] }
 cbc = "0.2.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 clap = { version = "4.6.7", features = ["derive"] }
@@ -38,12 +43,16 @@ egui = { version = "0.37.0", features = ["monochrome_emoji_fonts"] }
 egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }
 insta = "1.49.0"
 egui_tiles = "0.18.0"
+hkdf = "0.13.0"
 keyring = "4.2.0"
 proptest = "1.12.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json", "http2", "charset", "system-proxy"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
 serial2-tokio = { version = "0.1.25", features = ["unix", "windows"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
+sm4 = { version = "0.6.0", features = ["zeroize"] }
 toml = "1.1.8"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier", "json"] }
 uuid = { version = "1.28.0", features = ["v4"] }
@@ -64,7 +73,7 @@ russh = { version = "0.65.0", default-features = false, features = ["ring", "fla
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "sync", "time", "signal", "fs"] }
-zeroize = "1.9.1"
+zeroize = { version = "1.9.1", features = ["derive", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

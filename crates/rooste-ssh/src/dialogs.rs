@@ -168,6 +168,7 @@ impl ProfileEditor {
         folders: &[String],
         ports: &[String],
         scripts: &[String],
+        managed_keys: &[crate::vault_ui::ManagedKeySummary],
         picker: &mut Picker,
     ) -> Decision<(Profile, String)> {
         let mut decision = Decision::Pending;
@@ -252,6 +253,52 @@ impl ProfileEditor {
                                 }
                                 if p.protocol == Protocol::Ssh {
                                     text(ui, "User", &mut p.user);
+                                    if !managed_keys.is_empty() || p.key_sha256.is_some() {
+                                        labeled(ui, "Vault key", |ui| {
+                                            let selected_label = match &p.key_sha256 {
+                                                None => "(None — use key file / agent)".to_owned(),
+                                                Some(sha) => managed_keys
+                                                    .iter()
+                                                    .find(|k| &k.sha256 == sha)
+                                                    .map(|k| {
+                                                        format!(
+                                                            "{} ({})",
+                                                            k.label,
+                                                            &k.sha256[..8.min(k.sha256.len())]
+                                                        )
+                                                    })
+                                                    .unwrap_or_else(|| {
+                                                        format!(
+                                                            "Missing key ({})",
+                                                            &sha[..8.min(sha.len())]
+                                                        )
+                                                    }),
+                                            };
+                                            egui::ComboBox::from_id_salt("profile_vault_key_combo")
+                                                .width(crate::theme::FIELD_WIDTH)
+                                                .selected_text(selected_label)
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(
+                                                        &mut p.key_sha256,
+                                                        None,
+                                                        "(None — use key file / agent)",
+                                                    );
+                                                    for key in managed_keys {
+                                                        let text = format!(
+                                                            "{} ({})",
+                                                            key.label,
+                                                            &key.sha256[..8.min(key.sha256.len())]
+                                                        );
+                                                        ui.selectable_value(
+                                                            &mut p.key_sha256,
+                                                            Some(key.sha256.clone()),
+                                                            text,
+                                                        );
+                                                    }
+                                                })
+                                                .response
+                                        });
+                                    }
                                     path_row(
                                         ui,
                                         "Key file",
@@ -266,7 +313,7 @@ impl ProfileEditor {
         .on_hover_text("Offer outdated SHA-1 and CBC algorithms for old devices");
                                         ui.checkbox(
                                             &mut p.save_password,
-                                            "Save password in the system keyring",
+                                            "Save password (encrypted vault)",
                                         );
                                     });
                                     if p.save_password {

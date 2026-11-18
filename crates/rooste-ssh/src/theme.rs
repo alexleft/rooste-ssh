@@ -5,6 +5,14 @@ use rooste_terminal::Palette;
 
 use crate::terminal_view::TerminalView;
 
+/// Brand VI Kit color tokens (`docs/rooster-term-vi-kit/VI_GUIDELINES.md`).
+pub const MIDNIGHT_SLATE: egui::Color32 = egui::Color32::from_rgb(18, 22, 31);
+pub const ROOST_CHARCOAL: egui::Color32 = egui::Color32::from_rgb(28, 34, 48);
+pub const CREST_AMBER: egui::Color32 = egui::Color32::from_rgb(255, 107, 53);
+pub const DAWN_GOLD: egui::Color32 = egui::Color32::from_rgb(255, 184, 0);
+pub const TERMINAL_CYAN: egui::Color32 = egui::Color32::from_rgb(56, 189, 248);
+pub const NORDIC_SNOW: egui::Color32 = egui::Color32::from_rgb(244, 246, 249);
+
 pub fn palette(theme: Theme) -> Palette {
     match theme {
         Theme::Dark => Palette::default(),
@@ -14,8 +22,21 @@ pub fn palette(theme: Theme) -> Palette {
 
 pub fn visuals(theme: Theme) -> egui::Visuals {
     match theme {
-        Theme::Dark => egui::Visuals::dark(),
-        Theme::Light => egui::Visuals::light(),
+        Theme::Dark => {
+            let mut v = egui::Visuals::dark();
+            v.panel_fill = ROOST_CHARCOAL;
+            v.window_fill = ROOST_CHARCOAL;
+            v.extreme_bg_color = MIDNIGHT_SLATE;
+            v.hyperlink_color = TERMINAL_CYAN;
+            v.override_text_color = Some(NORDIC_SNOW);
+            v
+        }
+        Theme::Light => {
+            let mut v = egui::Visuals::light();
+            v.panel_fill = NORDIC_SNOW;
+            v.window_fill = NORDIC_SNOW;
+            v
+        }
     }
 }
 
@@ -61,13 +82,13 @@ fn colored_buttons<R>(
     .inner
 }
 
-/// `add` with buttons styled as a dialog's main action.
+/// `add` with buttons styled as a dialog's main action (Crest Amber `#FF6B35`).
 pub fn primary<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     use egui::Color32;
     let fills = [
-        Color32::from_rgb(29, 95, 200),
-        Color32::from_rgb(43, 112, 222),
-        Color32::from_rgb(22, 78, 170),
+        CREST_AMBER,
+        Color32::from_rgb(255, 128, 79),
+        Color32::from_rgb(224, 88, 38),
     ];
     colored_buttons(ui, fills, add)
 }

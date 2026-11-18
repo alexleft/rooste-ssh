@@ -78,6 +78,9 @@ impl ConnectForm {
             user: user.to_owned(),
             password: non_empty(&self.password),
             key_file: non_empty(self.key_file.trim()).map(|p| rooste_core::expand_tilde(&p)),
+            key_pem: None,
+            key_label: None,
+            require_passphrase_prompt: false,
             key_passphrase: None,
             use_agent: self.use_agent,
             allow_legacy: self.allow_legacy,
@@ -435,7 +438,7 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
             let is_gateway = matches!(tab.tmux_role, TmuxRole::Gateway { .. });
             let accent = if focused {
                 if is_gateway {
-                    egui::Color32::from_rgb(245, 130, 32)
+                    crate::theme::DAWN_GOLD
                 } else {
                     visuals.hyperlink_color
                 }
@@ -574,6 +577,10 @@ pub struct RoosteApp {
     /// Each tab group's selected tab in the last frame, to move the keyboard
     /// focus along when it changes.
     selected_tabs: HashMap<TileId, TileId>,
+    /// Encrypted vault & async multi-backend sync controller (zero OS Keyring dependency).
+    pub vault: Option<crate::vault_ui::VaultController>,
+    /// Shared UI context handle so background sync actor can call `request_repaint()`.
+    wake_ctx: Arc<std::sync::Mutex<Option<egui::Context>>>,
 }
 
 impl std::fmt::Debug for RoosteApp {
@@ -590,11 +597,11 @@ impl std::fmt::Debug for RoosteApp {
 }
 
 impl RoosteApp {
-    /// The app with the user's configuration and the OS credential store.
+    /// The app with the user's configuration and encrypted vault controller.
     pub fn new() -> Self {
         let location = ConfigLocation::detect();
         let (config, path, notice) = match Config::load(&location.path) {
-            Ok(config) => (config, Some(location.path), None),
+            Ok(config) => (config, Some(location.path.clone()), None),
             Err(e) => (
                 Config::default(),
                 // Do not overwrite a file we could not read.
@@ -606,7 +613,8 @@ impl RoosteApp {
                 }),
             ),
         };
-        let mut app = Self::with_config(config, path, Arc::new(crate::secrets::KeyringStore));
+        let mut app = Self::with_config(config, path, Arc::new(crate::secrets::KeyringStore))
+            .with_vault(location);
         app.notice = notice;
         app
     }
@@ -653,7 +661,31 @@ impl RoosteApp {
             window_title: String::new(),
             applied_theme: None,
             selected_tabs: HashMap::new(),
+            vault: None,
+            wake_ctx: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// Attach a `VaultController` rooted at `location`.
+    pub fn with_vault(mut self, location: ConfigLocation) -> Self {
+        let wake_handle = Arc::clone(&self.wake_ctx);
+        let wake_ui: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Ok(guard) = wake_handle.lock()
+                && let Some(ref ctx) = *guard
+            {
+                ctx.request_repaint();
+            }
+        });
+        if let Some(controller) =
+            crate::vault_ui::VaultController::new(location, self.runtime.handle(), wake_ui)
+        {
+            if controller.enabled {
+                // Keep plaintext profiles hidden until the vault is unlocked.
+                self.config.profiles.clear();
+            }
+            self.vault = Some(controller);
+        }
+        self
     }
 
     /// Use a specific known_hosts file instead of `~/.ssh/known_hosts`.
@@ -880,9 +912,20 @@ impl RoosteApp {
     }
 
     fn save_config(&mut self) {
-        if let Some(path) = &self.config_path
-            && let Err(e) = self.config.save(path)
-        {
+        let Some(path) = &self.config_path else {
+            return;
+        };
+        let vault_enabled = self.vault.as_ref().is_some_and(|v| v.enabled);
+        let res = if vault_enabled {
+            let settings_only = Config {
+                settings: self.config.settings.clone(),
+                profiles: Vec::new(),
+            };
+            settings_only.save(path)
+        } else {
+            self.config.save(path)
+        };
+        if let Err(e) = res {
             self.notice = Some(Notice {
                 text: e.to_string(),
                 error: true,
@@ -905,19 +948,38 @@ impl RoosteApp {
         } else {
             profile.user.clone()
         };
+        let managed_key = profile
+            .key_sha256
+            .as_deref()
+            .and_then(|sha| self.vault.as_ref().and_then(|v| v.load_ssh_key(sha)));
+        let (key_pem, key_label, key_passphrase, require_passphrase_prompt) = match managed_key {
+            Some(k) => (
+                Some(k.private_key_pem.clone()),
+                Some(k.label.clone()),
+                k.passphrase.as_deref().map(ToOwned::to_owned),
+                k.require_passphrase_prompt,
+            ),
+            None => (None, None, None, false),
+        };
+        let password = profile.save_password.then(|| {
+            self.vault
+                .as_ref()
+                .and_then(|v| v.load_password(&profile.id))
+                .or_else(|| self.secrets.get(&profile.id))
+        });
         ConnectRequest {
             host: profile.host.clone(),
             port: profile.effective_port(),
             user,
-            password: profile
-                .save_password
-                .then(|| self.secrets.get(&profile.id))
-                .flatten(),
+            password: password.flatten(),
             key_file: profile
                 .key_file
                 .as_ref()
                 .map(|p| rooste_core::expand_tilde(&p.to_string_lossy())),
-            key_passphrase: None,
+            key_pem,
+            key_label,
+            require_passphrase_prompt,
+            key_passphrase,
             use_agent: profile.use_agent,
             allow_legacy: profile.allow_legacy,
             known_hosts: self.known_hosts.clone(),
@@ -1751,7 +1813,15 @@ impl RoosteApp {
         match result {
             Ok(profiles) => {
                 let found = profiles.len();
+                let before_len = self.config.profiles.len();
                 let added = self.config.merge_imported(profiles);
+                if let Some(ref vault) = self.vault
+                    && vault.unlocked
+                {
+                    for p in &self.config.profiles[before_len..] {
+                        let _ = vault.save_profile(p);
+                    }
+                }
                 self.save_config();
                 let skipped = found - added;
                 let text = match (added, skipped) {
@@ -1810,6 +1880,12 @@ impl RoosteApp {
             ManagerAction::Duplicate(id) => {
                 if let Some(copy) = self.config.profile(&id).map(Profile::duplicate) {
                     self.manager.selected = Some(copy.id.clone());
+                    if let Some(ref vault) = self.vault
+                        && vault.unlocked
+                        && let Err(e) = vault.save_profile(&copy)
+                    {
+                        self.notify(e, true);
+                    }
                     self.config.upsert_profile(copy);
                     self.save_config();
                 }
@@ -1843,7 +1919,17 @@ impl RoosteApp {
         }
 
         self.ctx.get_or_insert_with(|| ctx.clone());
+        if let Ok(mut guard) = self.wake_ctx.lock()
+            && guard.is_none()
+        {
+            *guard = Some(ctx.clone());
+        }
         self.update_result();
+
+        if let Some(ref mut vault) = self.vault {
+            let v_actions = vault.poll(&ctx);
+            self.apply_vault_actions(v_actions);
+        }
 
         // Session events and tab actions.
         for id in self.tab_ids() {
@@ -1861,6 +1947,13 @@ impl RoosteApp {
                             .and_then(|id| self.config.profiles.iter_mut().find(|p| p.id == id))
                         {
                             profile.allow_legacy = true;
+                            let updated = profile.clone();
+                            if let Some(ref vault) = self.vault
+                                && vault.unlocked
+                                && let Err(e) = vault.save_profile(&updated)
+                            {
+                                self.notify(e, true);
+                            }
                             self.save_config();
                         }
                     }
@@ -1879,7 +1972,13 @@ impl RoosteApp {
                         profile_id,
                         password,
                     } => {
-                        if let Err(e) = self.secrets.set(&profile_id, &password) {
+                        if let Some(ref vault) = self.vault
+                            && vault.unlocked
+                        {
+                            if let Err(e) = vault.save_password(&profile_id, &password) {
+                                self.notify(e, true);
+                            }
+                        } else if let Err(e) = self.secrets.set(&profile_id, &password) {
                             self.notify(e, true);
                         }
                     }
@@ -1997,8 +2096,52 @@ impl RoosteApp {
             });
 
         self.dialogs(&ctx);
+        if let Some(mut vault) = self.vault.take() {
+            let v_actions = vault.modal_ui(
+                &ctx,
+                &self.config,
+                self.config_path.as_deref(),
+                self.secrets.as_ref(),
+                &mut self.picker,
+            );
+            self.vault = Some(vault);
+            self.apply_vault_actions(v_actions);
+        }
         self.shortcuts(&ctx);
         self.update_window_title(&ctx);
+    }
+
+    fn apply_vault_actions(&mut self, actions: Vec<crate::vault_ui::VaultUiAction>) {
+        use crate::vault_ui::VaultUiAction;
+        for action in actions {
+            match action {
+                VaultUiAction::ReloadProfiles(profiles) => {
+                    self.config.profiles = profiles;
+                }
+                VaultUiAction::VaultLocked => {
+                    self.config.profiles.clear();
+                }
+                VaultUiAction::LegacyMigrated { profiles, warnings } => {
+                    self.config.profiles = profiles;
+                    if warnings.is_empty() {
+                        self.notify(
+                            "Migrated profiles to SM4-GCM encrypted vault (legacy config backed up).",
+                            false,
+                        );
+                    } else {
+                        self.notify(
+                            format!(
+                                "Vault migrated with {} warning(s): {}",
+                                warnings.len(),
+                                warnings[0]
+                            ),
+                            true,
+                        );
+                    }
+                }
+                VaultUiAction::Notify { text, error } => self.notify(text, error),
+            }
+        }
     }
 
     /// Send input typed in broadcasting tabs to every connected tab.
@@ -2193,6 +2336,51 @@ impl RoosteApp {
                     ui.separator();
                     ui.weak(format!("Rooste SSH {}", env!("CARGO_PKG_VERSION")));
                 });
+                if self.vault.is_some() {
+                    let has_legacy_profiles = !self.config.profiles.is_empty();
+                    let mut toolbar_actions = Vec::new();
+                    ui.menu_button("Vault", |ui| {
+                        if let Some(ref mut vault) = self.vault {
+                            if !vault.enabled {
+                                let label = if has_legacy_profiles {
+                                    "Upgrade & Migrate to Encrypted Vault…"
+                                } else {
+                                    "Initialize / Recover Encrypted Vault…"
+                                };
+                                if ui.button(label).clicked() {
+                                    vault.open_onboarding(has_legacy_profiles);
+                                    ui.close();
+                                }
+                            } else {
+                                if ui.button("Managed SSH Keys…").clicked() {
+                                    vault.open_keys_manager();
+                                    ui.close();
+                                }
+                                if ui.button("Vault & Sync Settings…").clicked() {
+                                    vault.open_sync_settings();
+                                    ui.close();
+                                }
+                                if vault.unlocked {
+                                    if ui.button("Sync Now").clicked() {
+                                        vault.trigger_sync_now();
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("Lock Vault").clicked() {
+                                        toolbar_actions.push(vault.lock_now());
+                                        ui.close();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(ref mut vault) = self.vault {
+                            toolbar_actions.extend(vault.toolbar_ui(ui));
+                        }
+                    });
+                    self.apply_vault_actions(toolbar_actions);
+                }
             });
         });
     }
@@ -2335,17 +2523,35 @@ impl RoosteApp {
                     .scripts_dir()
                     .map(|dir| crate::scripting::list_scripts(&dir))
                     .unwrap_or_default();
+                let managed_keys = self
+                    .vault
+                    .as_ref()
+                    .map(|v| v.managed_keys.clone())
+                    .unwrap_or_default();
                 match editor.show(
                     ctx,
                     &self.config.folders(),
                     &self.serial_ports,
                     &scripts,
+                    &managed_keys,
                     &mut self.picker,
                 ) {
                     Decision::Pending => true,
                     Decision::Cancel => false,
                     Decision::Accept((profile, password)) => {
-                        if profile.save_password && !password.is_empty() {
+                        let vault_unlocked = self.vault.as_ref().is_some_and(|v| v.unlocked);
+                        if vault_unlocked {
+                            if let Some(ref vault) = self.vault {
+                                if let Err(e) = vault.save_profile(&profile) {
+                                    self.notify(e, true);
+                                } else if profile.save_password
+                                    && !password.is_empty()
+                                    && let Err(e) = vault.save_password(&profile.id, &password)
+                                {
+                                    self.notify(e, true);
+                                }
+                            }
+                        } else if profile.save_password && !password.is_empty() {
                             if let Err(e) = self.secrets.set(&profile.id, &password) {
                                 self.notify(e, true);
                             }
@@ -2383,7 +2589,15 @@ impl RoosteApp {
                     Decision::Pending => true,
                     Decision::Cancel => false,
                     Decision::Accept(()) => {
-                        self.secrets.delete(id);
+                        if let Some(ref vault) = self.vault
+                            && vault.unlocked
+                        {
+                            if let Err(e) = vault.delete_profile(id) {
+                                self.notify(e, true);
+                            }
+                        } else {
+                            self.secrets.delete(id);
+                        }
                         self.config.remove_profile(id);
                         self.save_config();
                         false

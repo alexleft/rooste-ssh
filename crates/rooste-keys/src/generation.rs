@@ -64,6 +64,20 @@ pub fn public_line(key: &PublicKey) -> String {
     key.to_openssh().unwrap_or_default()
 }
 
+/// Format `key` as a normalized OpenSSH private key PEM (LF line endings), optionally encrypted
+/// with `passphrase`.
+pub fn to_openssh_pem(
+    key: &PrivateKey,
+    passphrase: Option<&str>,
+) -> Result<zeroize::Zeroizing<String>, KeyError> {
+    let private = match passphrase.filter(|p| !p.is_empty()) {
+        Some(passphrase) => key.encrypt(&mut rand::rng(), passphrase)?,
+        None => key.clone(),
+    };
+    let text = private.to_openssh(LineEnding::LF)?;
+    Ok(zeroize::Zeroizing::new(text.to_string()))
+}
+
 /// Write `key` to `path` (readable only by the owner) and its public half to
 /// `path.pub`. With a passphrase the private key is encrypted. Existing
 /// files are not overwritten. Returns the public key path.

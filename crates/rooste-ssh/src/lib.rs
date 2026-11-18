@@ -18,5 +18,6 @@ pub mod terminal_view;
 pub mod theme;
 pub mod tools;
 pub mod update;
+pub mod vault_ui;
 
 pub use app::RoosteApp;

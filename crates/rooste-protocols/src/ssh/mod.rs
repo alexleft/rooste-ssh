@@ -146,6 +146,53 @@ pub fn load_private_key(path: &Path, passphrase: Option<&str>) -> Result<Private
     })
 }
 
+/// Decode an in-memory private key (OpenSSH PEM, legacy PEM, or PuTTY PPK text)
+/// without writing any temporary file to disk.
+pub fn load_private_key_from_pem(
+    label: &str,
+    text: &str,
+    passphrase: Option<&str>,
+) -> Result<PrivateKey, SshError> {
+    let synthetic_path = PathBuf::from(label);
+    let start = text.trim_start();
+    if start.starts_with("ssh-")
+        || start.starts_with("ecdsa-")
+        || start.starts_with("sk-")
+        || start.starts_with("---- BEGIN SSH2 PUBLIC KEY")
+    {
+        return Err(SshError::PublicKeyFile(synthetic_path));
+    }
+    if !start.starts_with("PuTTY-User-Key-File-") && !text.contains("PRIVATE KEY-----") {
+        return Err(SshError::NotAKey(synthetic_path));
+    }
+    if legacy_pem::is_encrypted(text) {
+        let Some(passphrase) = passphrase else {
+            return Err(SshError::KeyEncrypted(synthetic_path));
+        };
+        let plain = legacy_pem::decrypt(text, passphrase).map_err(|e| match e {
+            legacy_pem::Error::BadPassphrase => SshError::KeyEncrypted(synthetic_path.clone()),
+            legacy_pem::Error::Format(message) => SshError::KeyFormat {
+                path: synthetic_path.clone(),
+                message,
+            },
+        })?;
+        return keys::decode_secret_key(&plain, None).map_err(|source| SshError::Key {
+            path: synthetic_path,
+            source,
+        });
+    }
+    let encrypted_ppk = start.starts_with("PuTTY-User-Key-File-")
+        && text.lines().any(|l| l.trim() == "Encryption: aes256-cbc");
+    keys::decode_secret_key(text, passphrase).map_err(|e| match e {
+        keys::Error::KeyIsEncrypted => SshError::KeyEncrypted(synthetic_path),
+        _ if passphrase.is_none() && encrypted_ppk => SshError::KeyEncrypted(synthetic_path),
+        source => SshError::Key {
+            path: synthetic_path,
+            source,
+        },
+    })
+}
+
 fn is_encrypted_ppk(path: &Path) -> bool {
     std::fs::read_to_string(path).is_ok_and(|text| {
         text.starts_with("PuTTY-User-Key-File-")
