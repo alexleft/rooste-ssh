@@ -83,10 +83,21 @@ pub enum VaultModal {
     Rekey(RekeyState),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LockScreenState {
     pub password: Zeroizing<String>,
     pub error: Option<String>,
+    pub needs_focus: bool,
+}
+
+impl Default for LockScreenState {
+    fn default() -> Self {
+        Self {
+            password: Zeroizing::new(String::new()),
+            error: None,
+            needs_focus: true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -974,20 +985,27 @@ impl VaultController {
 
         match &mut modal {
             VaultModal::LockScreen(state) => {
-                egui::Window::new("🔒 Unlock Rooste Vault")
-                    .collapsible(false)
-                    .resizable(false)
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                egui::Modal::new(egui::Id::unique("vault-lock-screen"))
                     .frame(theme::dialog_frame(ctx))
                     .show(ctx, |ui| {
+                        ui.heading("🔒 Unlock Rooste Vault");
+                        ui.add_space(6.0);
                         ui.label("Enter your master password to decrypt the local SM4-GCM vault.");
                         ui.add_space(6.0);
                         let edit = ui.add(
                             egui::TextEdit::singleline(&mut *state.password)
+                                .id_salt("vault_lock_screen_password")
                                 .password(true)
                                 .hint_text("Master password")
                                 .desired_width(theme::FIELD_WIDTH),
                         );
+                        if state.needs_focus {
+                            if edit.has_focus() {
+                                state.needs_focus = false;
+                            } else {
+                                edit.request_focus();
+                            }
+                        }
                         let enter =
                             edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         if let Some(ref err) = state.error {
@@ -1002,7 +1020,10 @@ impl VaultController {
                                         actions.push(VaultUiAction::ReloadProfiles(profiles));
                                         self.trigger_sync_now();
                                     }
-                                    Err(err) => state.error = Some(err),
+                                    Err(err) => {
+                                        state.error = Some(err);
+                                        state.needs_focus = true;
+                                    }
                                 }
                             }
                             if ui.button("Forgot Password (24-Word Recovery)…").clicked() {

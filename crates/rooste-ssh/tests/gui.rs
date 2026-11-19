@@ -497,7 +497,7 @@ fn settings_are_saved_and_applied() {
 
     let saved = f.saved_config();
     assert_eq!(saved.settings.theme, Theme::Light);
-    assert!(!saved.settings.copy_on_select);
+    assert!(saved.settings.copy_on_select);
     assert!(
         !harness.ctx.global_style().visuals.dark_mode,
         "light visuals applied"
@@ -1858,7 +1858,7 @@ fn telnet_session_reports_window_size() {
     let f = Fixture::new();
     let server = f.net.block_on(rooste_testkit::TelnetServer::start());
     let profile = plain_profile("switch", rooste_core::Protocol::Telnet, server.addr.port());
-    let mut harness = harness(f.app(Config {
+    let mut harness = self::harness(f.app(Config {
         profiles: vec![profile],
         ..Config::default()
     }));
@@ -1893,7 +1893,7 @@ fn raw_tcp_session_echoes() {
     let f = Fixture::new();
     let echo = f.net.block_on(rooste_testkit::EchoServer::start());
     let profile = plain_profile("raw echo", rooste_core::Protocol::Raw, echo.addr.port());
-    let mut harness = harness(f.app(Config {
+    let mut harness = self::harness(f.app(Config {
         profiles: vec![profile],
         ..Config::default()
     }));
@@ -1948,7 +1948,7 @@ fn missing_serial_port_fails_clearly() {
         host: port.into(),
         ..Profile::default()
     };
-    let mut harness = harness(f.app(Config {
+    let mut harness = self::harness(f.app(Config {
         profiles: vec![profile],
         ..Config::default()
     }));
@@ -1958,6 +1958,118 @@ fn missing_serial_port_fails_clearly() {
         "failure",
         |app| matches!(first_tab(app).map(|t| &t.state), Some(TabState::Failed(m)) if m.contains("Could not open the serial port") && m.contains(port)),
     );
+}
+
+#[test]
+fn terminal_context_menu_and_right_click_settings() {
+    let f = Fixture::new();
+    let mut harness = harness(f.app(Config::default()));
+
+    // Verify defaults: Mode A (ContextMenu), copy_on_select = false, ctrl_v_paste = true.
+    assert_eq!(
+        harness.state().config.settings.right_click_action,
+        rooste_core::RightClickAction::ContextMenu
+    );
+    assert!(!harness.state().config.settings.copy_on_select);
+    assert!(harness.state().config.settings.ctrl_v_paste);
+
+    // Selecting Mode C (Classic PuTTY) in Settings auto-enables `copy_on_select`.
+    open_menu_item(&mut harness, "Session", "Settings…");
+    harness
+        .get_by_label("Classic PuTTY (Paste directly + Copy on select)")
+        .click();
+    settle(&mut harness);
+    harness
+        .get_by_label("Paste with Ctrl+V (Windows / Linux)")
+        .click();
+    settle(&mut harness);
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+
+    let saved = f.saved_config();
+    assert_eq!(
+        saved.settings.right_click_action,
+        rooste_core::RightClickAction::Paste
+    );
+    assert!(saved.settings.copy_on_select);
+    assert!(!saved.settings.ctrl_v_paste);
+
+    // Connect a raw echo session in default Mode A and verify right-click context menu + Multi-line Paste…
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
+                if n == 0 {
+                    break;
+                }
+                let _ = std::io::Write::write_all(&mut stream, &buf[..n]);
+            }
+        }
+    });
+    let profile = Profile {
+        name: "ctx echo".into(),
+        protocol: rooste_core::Protocol::Raw,
+        host: "127.0.0.1".into(),
+        port: Some(port),
+        ..Profile::default()
+    };
+    let mut harness = self::harness(f.app(Config {
+        profiles: vec![profile],
+        ..Config::default()
+    }));
+    context_menu(&mut harness, "ctx echo", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+
+    // Send some text so the screen isn't empty, then test Select All -> Copy -> Multi-line Paste…
+    harness.event(egui::Event::Text("hello terminal".into()));
+    wait_for(&mut harness, "echo", |app| {
+        screen_text(app).contains("hello terminal")
+    });
+
+    // Right-click the terminal viewport to open Mode A's context menu.
+    harness.get_by_label("Terminal").click_secondary();
+    settle(&mut harness);
+    let paste_label = if cfg!(target_os = "macos") {
+        "Paste Cmd+V"
+    } else {
+        "Paste Ctrl+V"
+    };
+    harness.get_by_label(paste_label);
+    harness.get_by_label("Clear Scrollback");
+    harness.get_by_label_contains("Select All").click();
+    settle(&mut harness);
+    assert!(
+        first_tab(harness.state())
+            .unwrap()
+            .terminal
+            .selection_text()
+            .is_some()
+    );
+
+    // Now that text is selected, Copy is enabled in the context menu.
+    harness.get_by_label("Terminal").click_secondary();
+    settle(&mut harness);
+    harness.get_by_label_contains("Copy").click();
+    settle(&mut harness);
+    assert!(
+        first_tab(harness.state())
+            .unwrap()
+            .terminal
+            .selection_text()
+            .is_none()
+    );
+
+    // Open Multi-line Paste… preview modal from Mode A context menu.
+    harness.get_by_label("Terminal").click_secondary();
+    settle(&mut harness);
+    harness.get_by_label("Multi-line Paste…").click();
+    settle(&mut harness);
+    harness.get_by_label("Multi-line Paste");
+    harness.get_by_label("Paste as Single Line");
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
 }
 
 /// Icons must come from the bundled fonts: a symbol that only some system

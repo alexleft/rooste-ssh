@@ -439,6 +439,26 @@ impl Terminal {
         self.term.selection = None;
     }
 
+    /// Select all text in the scrollback history and visible screen.
+    pub fn select_all(&mut self) {
+        let top = self.term.topmost_line();
+        let bottom = self.term.bottommost_line();
+        let last_col = Column(self.term.columns().saturating_sub(1));
+        let mut selection = Selection::new(
+            SelectionType::Simple,
+            Point::new(top, Column(0)),
+            Side::Left,
+        );
+        selection.update(Point::new(bottom, last_col), Side::Right);
+        self.term.selection = Some(selection);
+    }
+
+    /// Clear scrollback history above the visible screen.
+    pub fn clear_scrollback(&mut self) {
+        self.term.grid_mut().clear_history();
+        self.term.selection = None;
+    }
+
     /// Find `text` in the screen and scrollback (ignoring case unless it
     /// has capitals), continuing from the last match and wrapping around.
     /// The match is selected and scrolled into view. Returns false if

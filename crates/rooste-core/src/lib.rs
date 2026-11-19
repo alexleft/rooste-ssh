@@ -14,7 +14,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-pub use config::{Config, ConfigLocation, Settings, Theme, backup_legacy_config};
+pub use config::{Config, ConfigLocation, RightClickAction, Settings, Theme, backup_legacy_config};
 pub use destination::Destination;
 pub use import::expand_tilde;
 pub use local::{

@@ -1250,6 +1250,9 @@ impl SessionTab {
             }
         }
         let out = self.view.show(ui, &mut self.terminal);
+        if out.open_find {
+            self.open_find();
+        }
         if self.state == TabState::Connected {
             // Also catches resizes that happened while connecting.
             let size = self.terminal.size();

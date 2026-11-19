@@ -4,15 +4,18 @@
 use std::time::{Duration, Instant};
 
 use egui::{
-    Color32, CornerRadius, Event, FontId, Id, PointerButton, Pos2, Rect, Response, Sense, Stroke,
-    StrokeKind, Ui, Vec2, pos2, vec2,
+    Color32, CornerRadius, Event, FontId, Id, Modal, PointerButton, Pos2, Rect, Response, RichText,
+    Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
+use rooste_core::RightClickAction;
 use rooste_terminal::input::{self, MouseAction, MouseButton};
 use rooste_terminal::{CursorShape, MouseReport, Rgb, Screen, SelectionKind, Terminal};
 
 use crate::keys::{Action, KeyTranslator};
 
 const MULTI_CLICK: Duration = Duration::from_millis(400);
+const COPIED_BANNER_DURATION: Duration = Duration::from_millis(1400);
+const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// What the widget wants the session to do after a frame.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -21,6 +24,8 @@ pub struct ViewOutput {
     pub send: Vec<u8>,
     /// The grid size changed to (columns, rows).
     pub resize: Option<(u16, u16)>,
+    /// User chose "Find…" from the terminal context menu.
+    pub open_find: bool,
 }
 
 /// Gap between the terminal text and the edges of its area.
@@ -48,8 +53,12 @@ pub struct TerminalView {
     pub font_size: f32,
     /// This tab's zoom, multiplying `font_size` (1.0 = 100%).
     pub zoom: f32,
+    /// What right-clicking inside the terminal does.
+    pub right_click_action: RightClickAction,
     /// Copy the selection to the clipboard when the mouse button is released.
     pub copy_on_select: bool,
+    /// On Windows/Linux, let plain `Ctrl+V` paste directly.
+    pub ctrl_v_paste: bool,
     keys: KeyTranslator,
     /// Fractional wheel lines not yet scrolled.
     scroll_accum: f32,
@@ -58,6 +67,12 @@ pub struct TerminalView {
     /// Mouse button currently held while reporting to the application.
     reported_button: Option<MouseButton>,
     selecting: bool,
+    /// Last auto-scroll tick while dragging selection past the viewport edge.
+    drag_scroll_at: Option<Instant>,
+    /// Brief "Copied" toast shown in the top-right corner of the terminal.
+    copied_banner: Option<(String, Instant)>,
+    /// Pending text inside the dedicated "Multi-line Paste…" preview modal.
+    multiline_paste: Option<String>,
     /// While dragging the scrollbar: where the thumb was grabbed, from its top.
     scrollbar_grab: Option<f32>,
     /// Take keyboard focus as soon as possible, e.g. when its tab is clicked.
@@ -71,13 +86,18 @@ impl Default for TerminalView {
         Self {
             font_size: 14.0,
             zoom: 1.0,
-            copy_on_select: true,
+            right_click_action: RightClickAction::ContextMenu,
+            copy_on_select: false,
+            ctrl_v_paste: true,
             keys: KeyTranslator::default(),
             scroll_accum: 0.0,
             clicks: 0,
             last_click: None,
             reported_button: None,
             selecting: false,
+            drag_scroll_at: None,
+            copied_banner: None,
+            multiline_paste: None,
             scrollbar_grab: None,
             focus_requested: false,
             has_focus: false,
@@ -199,11 +219,21 @@ impl TerminalView {
             origin: rect.min + vec2(PADDING, PADDING),
         };
 
-        if response.has_focus() {
+        if response.has_focus() && self.multiline_paste.is_none() {
             self.handle_keyboard(ui, term, &mut out);
         }
         let hovered = response.hovered() || bar.hovered();
-        self.handle_mouse(ui, term, &response, hovered, metrics, &mut out);
+        if self.multiline_paste.is_none() {
+            self.handle_mouse(ui, term, &response, hovered, metrics, &mut out);
+        }
+
+        // Mode A: right-click context menu (when not captured by remote app mouse reporting).
+        let shift_held = ui.input(|i| i.modifiers.shift);
+        let app_mouse_reporting = term.mouse_mode().report != MouseReport::None && !shift_held;
+        if self.right_click_action == RightClickAction::ContextMenu && !app_mouse_reporting {
+            self.context_menu(&response, term, &mut out);
+        }
+
         let thumb = self.scrollbar(term, &bar);
 
         if self.has_focus != response.has_focus() {
@@ -218,6 +248,7 @@ impl TerminalView {
             self.focus_requested = false;
         }
         self.paint(ui, rect, metrics, &term.screen(), self.has_focus);
+        self.paint_copied_banner(ui, text_rect);
         if let Some(thumb) = thumb {
             let widgets = &ui.visuals().widgets;
             let fill = if bar.dragged() || bar.is_pointer_button_down_on() {
@@ -229,32 +260,254 @@ impl TerminalView {
             };
             ui.painter_at(rect).rect_filled(thumb, 3.0, fill);
         }
+        self.show_multiline_paste_modal(ui.ctx(), id, term, &mut out);
         out
+    }
+
+    fn copy_selection(&mut self, ctx: &egui::Context, term: &mut Terminal, clear: bool) {
+        if let Some(text) = term.selection_text()
+            && !text.is_empty()
+        {
+            let lines = text.lines().count().max(1);
+            let label = if lines > 1 {
+                format!("Copied {lines} lines")
+            } else {
+                "Copied".to_owned()
+            };
+            ctx.copy_text(text);
+            self.copied_banner = Some((label, Instant::now()));
+        }
+        if clear {
+            term.clear_selection();
+        }
+    }
+
+    fn paste_text(term: &mut Terminal, out: &mut ViewOutput, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        term.scroll_to_bottom();
+        out.send
+            .extend(input::encode_paste(text, term.bracketed_paste()));
+    }
+
+    fn context_menu(&mut self, response: &Response, term: &mut Terminal, out: &mut ViewOutput) {
+        let has_sel = term.selection_text().is_some();
+        let copy_hint = if cfg!(target_os = "macos") {
+            "Cmd+C"
+        } else if has_sel {
+            "Ctrl+C"
+        } else {
+            "Ctrl+Shift+C"
+        };
+        let paste_hint = if cfg!(target_os = "macos") {
+            "Cmd+V"
+        } else if self.ctrl_v_paste {
+            "Ctrl+V"
+        } else {
+            "Ctrl+Shift+V"
+        };
+        let select_all_hint = if cfg!(target_os = "macos") {
+            "Cmd+A"
+        } else {
+            "Ctrl+Shift+A"
+        };
+        let find_hint = if cfg!(target_os = "macos") {
+            "Cmd+Shift+F"
+        } else {
+            "Ctrl+Shift+F"
+        };
+
+        response.context_menu(|ui| {
+            if ui
+                .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text(copy_hint))
+                .clicked()
+            {
+                self.copy_selection(ui.ctx(), term, true);
+                ui.close();
+            }
+            if ui
+                .add(egui::Button::new("Paste").shortcut_text(paste_hint))
+                .clicked()
+            {
+                if let Some(text) = read_clipboard() {
+                    Self::paste_text(term, out, &text);
+                }
+                ui.close();
+            }
+            if ui.button("Multi-line Paste…").clicked() {
+                self.multiline_paste = Some(read_clipboard().unwrap_or_default());
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .add(egui::Button::new("Select All").shortcut_text(select_all_hint))
+                .clicked()
+            {
+                term.select_all();
+                ui.close();
+            }
+            if ui
+                .add(egui::Button::new("Find…").shortcut_text(find_hint))
+                .clicked()
+            {
+                out.open_find = true;
+                ui.close();
+            }
+            if ui.button("Clear Scrollback").clicked() {
+                term.clear_scrollback();
+                ui.close();
+            }
+        });
+    }
+
+    fn show_multiline_paste_modal(
+        &mut self,
+        ctx: &egui::Context,
+        terminal_id: Id,
+        term: &mut Terminal,
+        out: &mut ViewOutput,
+    ) {
+        let Some(mut text) = self.multiline_paste.take() else {
+            return;
+        };
+        let mut keep_open = true;
+        let modal_resp = Modal::new(Id::unique(("multiline-paste", terminal_id)))
+            .frame(crate::theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_min_width(480.0);
+                ui.set_max_width(580.0);
+                ui.heading("Multi-line Paste");
+                let line_count = if text.is_empty() {
+                    0
+                } else {
+                    text.lines().count().max(1)
+                };
+                ui.label(
+                    RichText::new(format!(
+                        "Review or edit before sending to the terminal ({line_count} line(s), {} char(s)).",
+                        text.chars().count()
+                    ))
+                    .small()
+                    .weak(),
+                );
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .id_salt(("multiline-paste-scroll", terminal_id))
+                    .max_height(240.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut text)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_rows(8)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        keep_open = false;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let non_empty = !text.is_empty();
+                        if ui
+                            .add_enabled_ui(non_empty, |ui| {
+                                crate::theme::primary_button(ui, "Paste")
+                            })
+                            .inner
+                            .clicked()
+                        {
+                            Self::paste_text(term, out, &text);
+                            keep_open = false;
+                            self.focus_requested = true;
+                        }
+                        if ui
+                            .add_enabled(non_empty, egui::Button::new("Paste as Single Line"))
+                            .on_hover_text("Join all lines with spaces before sending")
+                            .clicked()
+                        {
+                            let single = collapse_to_single_line(&text);
+                            Self::paste_text(term, out, &single);
+                            keep_open = false;
+                            self.focus_requested = true;
+                        }
+                    });
+                });
+            });
+        if modal_resp.should_close() {
+            keep_open = false;
+            self.focus_requested = true;
+        }
+        if keep_open {
+            self.multiline_paste = Some(text);
+        }
+    }
+
+    fn paint_copied_banner(&mut self, ui: &Ui, text_rect: Rect) {
+        let Some((ref text, shown_at)) = self.copied_banner else {
+            return;
+        };
+        let elapsed = shown_at.elapsed();
+        if elapsed >= COPIED_BANNER_DURATION {
+            self.copied_banner = None;
+            return;
+        }
+        ui.ctx()
+            .request_repaint_after(COPIED_BANNER_DURATION.saturating_sub(elapsed));
+
+        let galley = ui.painter().layout_no_wrap(
+            text.clone(),
+            FontId::proportional(12.0),
+            crate::theme::NORDIC_SNOW,
+        );
+        let pad = vec2(10.0, 4.0);
+        let size = galley.size() + pad * 2.0;
+        let top_right = pos2(text_rect.right() - 10.0, text_rect.top() + 10.0);
+        let pill = Rect::from_min_size(pos2(top_right.x - size.x, top_right.y), size);
+        let painter = ui.painter_at(text_rect);
+        painter.rect_filled(
+            pill,
+            CornerRadius::same(4),
+            Color32::from_rgba_unmultiplied(15, 23, 42, 225),
+        );
+        painter.rect_stroke(
+            pill,
+            CornerRadius::same(4),
+            Stroke::new(1.0, crate::theme::TERMINAL_CYAN),
+            StrokeKind::Inside,
+        );
+        painter.galley(pill.min + pad, galley, crate::theme::NORDIC_SNOW);
     }
 
     fn handle_keyboard(&mut self, ui: &Ui, term: &mut Terminal, out: &mut ViewOutput) {
         let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
         for event in &events {
             let has_selection = term.selection_text().is_some();
-            match self
-                .keys
-                .translate(event, modifiers, term.input_mode(), has_selection)
-            {
+            match self.keys.translate(
+                event,
+                modifiers,
+                term.input_mode(),
+                has_selection,
+                self.ctrl_v_paste,
+            ) {
                 Some(Action::Send(bytes)) => {
                     term.clear_selection();
                     term.scroll_to_bottom();
                     out.send.extend_from_slice(&bytes);
                 }
                 Some(Action::Copy) => {
-                    if let Some(text) = term.selection_text() {
-                        ui.ctx().copy_text(text);
-                    }
-                    term.clear_selection();
+                    self.copy_selection(ui.ctx(), term, true);
                 }
                 Some(Action::Paste(text)) => {
-                    term.scroll_to_bottom();
-                    out.send
-                        .extend(input::encode_paste(&text, term.bracketed_paste()));
+                    Self::paste_text(term, out, &text);
+                }
+                Some(Action::PasteFromClipboard) => {
+                    if let Some(text) = read_clipboard() {
+                        Self::paste_text(term, out, &text);
+                    }
+                }
+                Some(Action::SelectAll) => {
+                    term.select_all();
                 }
                 None => {}
             }
@@ -331,19 +584,36 @@ impl TerminalView {
                         }
                         (MouseButton::Left, false) => {
                             self.selecting = false;
-                            // Copy on select, as PuTTY does.
+                            self.drag_scroll_at = None;
+                            // Copy on select when enabled (default off; auto-enabled in Classic PuTTY mode).
                             match term.selection_text() {
-                                Some(text) if self.copy_on_select => ui.ctx().copy_text(text),
+                                Some(_) if self.copy_on_select => {
+                                    self.copy_selection(ui.ctx(), term, false);
+                                }
                                 Some(_) => {}
                                 None => term.clear_selection(),
                             }
                         }
-                        // Right or middle click pastes, as PuTTY does.
-                        (MouseButton::Right | MouseButton::Middle, true) => {
+                        // Right-click follows the configured mode (ContextMenu is handled via `response.context_menu`).
+                        (MouseButton::Right, true) => match self.right_click_action {
+                            RightClickAction::ContextMenu => {}
+                            RightClickAction::SmartCopyPaste => {
+                                if term.selection_text().is_some() {
+                                    self.copy_selection(ui.ctx(), term, true);
+                                } else if let Some(text) = read_clipboard() {
+                                    Self::paste_text(term, out, &text);
+                                }
+                            }
+                            RightClickAction::Paste => {
+                                if let Some(text) = read_clipboard() {
+                                    Self::paste_text(term, out, &text);
+                                }
+                            }
+                        },
+                        // Middle-click pastes directly.
+                        (MouseButton::Middle, true) => {
                             if let Some(text) = read_clipboard() {
-                                term.scroll_to_bottom();
-                                out.send
-                                    .extend(input::encode_paste(&text, term.bracketed_paste()));
+                                Self::paste_text(term, out, &text);
                             }
                         }
                         _ => {}
@@ -430,6 +700,35 @@ impl TerminalView {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // Auto-scroll scrollback when dragging a selection past the top or bottom edge.
+        if self.selecting
+            && !term.alt_screen()
+            && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        {
+            let grid_bottom = metrics.origin.y + rows as f32 * metrics.cell.y;
+            let scroll_dir = if pos.y < metrics.origin.y {
+                1
+            } else if pos.y > grid_bottom {
+                -1
+            } else {
+                0
+            };
+            if scroll_dir != 0 {
+                let due = self
+                    .drag_scroll_at
+                    .is_none_or(|t| t.elapsed() >= DRAG_SCROLL_INTERVAL);
+                if due {
+                    term.scroll(scroll_dir);
+                    let (col, row, right) = metrics.cell_at(pos, cols, rows);
+                    term.select_update(col, row, right);
+                    self.drag_scroll_at = Some(Instant::now());
+                }
+                ui.ctx().request_repaint_after(DRAG_SCROLL_INTERVAL);
+            } else {
+                self.drag_scroll_at = None;
             }
         }
     }
@@ -592,6 +891,14 @@ impl TerminalView {
             }
         }
     }
+}
+
+fn collapse_to_single_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn read_clipboard() -> Option<String> {

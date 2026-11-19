@@ -25,14 +25,32 @@ pub enum Theme {
     Light,
 }
 
+/// What right-clicking inside the terminal viewport does.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RightClickAction {
+    /// Mode A (default): open a context menu (Copy, Paste, Multi-line Paste…, Select All, …).
+    #[default]
+    ContextMenu,
+    /// Mode B: copy when text is selected, otherwise paste directly.
+    SmartCopyPaste,
+    /// Mode C (Classic PuTTY): paste directly (auto-enables copy-on-select in Settings).
+    Paste,
+}
+
 /// Application settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub font_size: f32,
     pub scrollback_lines: usize,
+    /// What right-clicking in the terminal does.
+    pub right_click_action: RightClickAction,
     /// Copy selected text to the clipboard as soon as it is selected.
     pub copy_on_select: bool,
+    /// On Windows/Linux, allow `Ctrl+V` to paste directly into the terminal
+    /// (when disabled, `Ctrl+V` sends raw `^V` while `Ctrl+Shift+V` / `Shift+Insert` still paste).
+    pub ctrl_v_paste: bool,
     pub theme: Theme,
     /// Ask before closing a tab with an active connection.
     pub confirm_close: bool,
@@ -66,7 +84,9 @@ impl Default for Settings {
         Self {
             font_size: 14.0,
             scrollback_lines: 10_000,
-            copy_on_select: true,
+            right_click_action: RightClickAction::ContextMenu,
+            copy_on_select: false,
+            ctrl_v_paste: true,
             theme: Theme::Dark,
             confirm_close: true,
             default_user: String::new(),

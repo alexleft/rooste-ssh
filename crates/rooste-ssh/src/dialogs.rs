@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use egui::{Id, Modal, Ui};
 use rooste_core::{
-    FlowControl, Parity, Profile, Protocol, SerialSettings, Settings, Theme, Tunnel, TunnelKind,
+    FlowControl, Parity, Profile, Protocol, RightClickAction, SerialSettings, Settings, Theme,
+    Tunnel, TunnelKind,
 };
 use rooste_protocols::ssh::UnknownHostKey;
 
@@ -606,8 +607,44 @@ impl SettingsEditor {
                             "Every session's output is saved as text in this folder. \
                              Leave empty to log only when you start it from a tab.",
                         );
+                        labeled(ui, "Right-click & clipboard", |ui| {
+                            ui.vertical(|ui| {
+                                let prev = s.right_click_action;
+                                ui.radio_value(
+                                    &mut s.right_click_action,
+                                    RightClickAction::ContextMenu,
+                                    "Context menu (Copy, Paste, Multi-line Paste…)",
+                                );
+                                ui.radio_value(
+                                    &mut s.right_click_action,
+                                    RightClickAction::SmartCopyPaste,
+                                    "Smart (Copy if selected, otherwise Paste)",
+                                );
+                                ui.radio_value(
+                                    &mut s.right_click_action,
+                                    RightClickAction::Paste,
+                                    "Classic PuTTY (Paste directly + Copy on select)",
+                                );
+                                // Selecting Classic PuTTY mode automatically enables copy-on-select.
+                                if s.right_click_action == RightClickAction::Paste
+                                    && prev != RightClickAction::Paste
+                                {
+                                    s.copy_on_select = true;
+                                }
+                                ui.add_space(4.0);
+                                ui.checkbox(&mut s.copy_on_select, "Copy text when selected");
+                                ui.checkbox(
+                                    &mut s.ctrl_v_paste,
+                                    "Paste with Ctrl+V (Windows / Linux)",
+                                )
+                                .on_hover_text(
+                                    "When unchecked, Ctrl+V sends raw ^V to the terminal; \
+                                     Ctrl+Shift+V and Shift+Insert still paste.",
+                                );
+                            })
+                            .response
+                        });
                         checkboxes(ui, |ui| {
-                            ui.checkbox(&mut s.copy_on_select, "Copy text when selected");
                             ui.checkbox(&mut s.confirm_close, "Ask before closing a connected tab");
                             ui.checkbox(
                                 &mut s.auto_reconnect,

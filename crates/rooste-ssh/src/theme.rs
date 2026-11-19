@@ -121,7 +121,9 @@ pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
 
 pub fn apply_to_view(view: &mut TerminalView, settings: &Settings) {
     view.font_size = settings.font_size.clamp(6.0, 48.0);
+    view.right_click_action = settings.right_click_action;
     view.copy_on_select = settings.copy_on_select;
+    view.ctrl_v_paste = settings.ctrl_v_paste;
 }
 
 /// The folder last chosen with "Download to…", if any.

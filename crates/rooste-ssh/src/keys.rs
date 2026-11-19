@@ -21,6 +21,10 @@ pub enum Action {
     Copy,
     /// Paste this text (already read from the clipboard by egui).
     Paste(String),
+    /// Paste from the system clipboard (e.g. `Shift+Insert`).
+    PasteFromClipboard,
+    /// Select all text in the terminal scrollback + visible screen.
+    SelectAll,
 }
 
 /// Stateful per frame: remembers Alt+key so the duplicate `Text` is dropped.
@@ -32,13 +36,15 @@ pub struct KeyTranslator {
 impl KeyTranslator {
     /// Translate one event. `modifiers` are the frame's current modifiers
     /// (egui's `Copy`/`Paste` events carry none). `has_selection` decides
-    /// whether Ctrl+C copies or interrupts.
+    /// whether Ctrl+C copies or interrupts; `ctrl_v_paste` decides whether
+    /// plain `Ctrl+V` pastes on Windows/Linux (or sends raw `^V`).
     pub fn translate(
         &mut self,
         event: &Event,
         modifiers: Modifiers,
         mode: InputMode,
         has_selection: bool,
+        ctrl_v_paste: bool,
     ) -> Option<Action> {
         match event {
             Event::Text(text) => {
@@ -56,8 +62,50 @@ impl KeyTranslator {
             Event::Copy if modifiers.shift || has_selection => Some(Action::Copy),
             Event::Copy => Some(Action::Send(vec![0x03])),
             Event::Cut => Some(Action::Send(vec![0x18])),
-            Event::Paste(text) if modifiers.shift => Some(Action::Paste(text.clone())),
+            Event::Paste(text) if modifiers.shift || ctrl_v_paste => {
+                Some(Action::Paste(text.clone()))
+            }
             Event::Paste(_) => Some(Action::Send(vec![0x16])),
+            Event::Key {
+                key: Key::Insert,
+                pressed: true,
+                modifiers,
+                ..
+            } if !cfg!(target_os = "macos")
+                && modifiers.ctrl
+                && !modifiers.shift
+                && !modifiers.alt =>
+            {
+                Some(Action::Copy)
+            }
+            Event::Key {
+                key: Key::Insert,
+                pressed: true,
+                modifiers,
+                ..
+            } if !cfg!(target_os = "macos")
+                && modifiers.shift
+                && !modifiers.ctrl
+                && !modifiers.alt =>
+            {
+                Some(Action::PasteFromClipboard)
+            }
+            Event::Key {
+                key: Key::A,
+                pressed: true,
+                modifiers,
+                ..
+            } if (cfg!(target_os = "macos")
+                && modifiers.mac_cmd
+                && !modifiers.ctrl
+                && !modifiers.alt)
+                || (!cfg!(target_os = "macos")
+                    && modifiers.ctrl
+                    && modifiers.shift
+                    && !modifiers.alt) =>
+            {
+                Some(Action::SelectAll)
+            }
             Event::Key {
                 key,
                 pressed: true,
@@ -165,7 +213,7 @@ mod tests {
     }
 
     fn send(t: &mut KeyTranslator, event: Event) -> Option<Vec<u8>> {
-        match t.translate(&event, Modifiers::NONE, InputMode::default(), false) {
+        match t.translate(&event, Modifiers::NONE, InputMode::default(), false, true) {
             Some(Action::Send(bytes)) => Some(bytes),
             Some(other) => panic!("unexpected {other:?}"),
             None => None,
@@ -204,7 +252,8 @@ mod tests {
                 &key(Key::ArrowLeft, Modifiers::NONE),
                 Modifiers::NONE,
                 app,
-                false
+                false,
+                true,
             ),
             Some(Action::Send(b"\x1bOD".to_vec()))
         );
@@ -252,13 +301,28 @@ mod tests {
         let mode = InputMode::default();
         for event in [Event::Copy, Event::Cut] {
             assert_eq!(
-                t.translate(&event, Modifiers::COMMAND, mode, false),
+                t.translate(&event, Modifiers::COMMAND, mode, false, true),
                 Some(Action::Copy)
             );
         }
         assert_eq!(
-            t.translate(&Event::Paste("x".into()), Modifiers::COMMAND, mode, false),
+            t.translate(
+                &Event::Paste("x".into()),
+                Modifiers::COMMAND,
+                mode,
+                false,
+                true
+            ),
             Some(Action::Paste("x".into()))
+        );
+        let cmd = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(
+            t.translate(&key(Key::A, cmd), cmd, mode, false, true),
+            Some(Action::SelectAll)
         );
     }
 
@@ -272,28 +336,60 @@ mod tests {
             ..Modifiers::NONE
         };
         assert_eq!(
-            t.translate(&Event::Copy, Modifiers::CTRL, mode, false),
+            t.translate(&Event::Copy, Modifiers::CTRL, mode, false, true),
             Some(Action::Send(vec![0x03]))
         );
         assert_eq!(
-            t.translate(&Event::Copy, Modifiers::CTRL, mode, true),
+            t.translate(&Event::Copy, Modifiers::CTRL, mode, true, true),
             Some(Action::Copy)
         );
         assert_eq!(
-            t.translate(&Event::Copy, shift, mode, false),
+            t.translate(&Event::Copy, shift, mode, false, true),
             Some(Action::Copy)
         );
+        // With `ctrl_v_paste = true`, plain Ctrl+V pastes directly.
         assert_eq!(
-            t.translate(&Event::Paste("x".into()), Modifiers::CTRL, mode, false),
+            t.translate(
+                &Event::Paste("x".into()),
+                Modifiers::CTRL,
+                mode,
+                false,
+                true
+            ),
+            Some(Action::Paste("x".into()))
+        );
+        // With `ctrl_v_paste = false`, plain Ctrl+V sends raw ^V while Ctrl+Shift+V still pastes.
+        assert_eq!(
+            t.translate(
+                &Event::Paste("x".into()),
+                Modifiers::CTRL,
+                mode,
+                false,
+                false
+            ),
             Some(Action::Send(vec![0x16]))
         );
         assert_eq!(
-            t.translate(&Event::Paste("x".into()), shift, mode, false),
+            t.translate(&Event::Paste("x".into()), shift, mode, false, false),
             Some(Action::Paste("x".into()))
         );
         assert_eq!(
-            t.translate(&Event::Cut, Modifiers::CTRL, mode, false),
+            t.translate(&Event::Cut, Modifiers::CTRL, mode, false, true),
             Some(Action::Send(vec![0x18]))
+        );
+        assert_eq!(
+            t.translate(
+                &key(Key::Insert, Modifiers::CTRL),
+                Modifiers::CTRL,
+                mode,
+                false,
+                true
+            ),
+            Some(Action::Copy)
+        );
+        assert_eq!(
+            t.translate(&key(Key::Insert, shift), shift, mode, false, true),
+            Some(Action::PasteFromClipboard)
         );
     }
 }

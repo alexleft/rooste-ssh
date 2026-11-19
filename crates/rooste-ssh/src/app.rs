@@ -2081,7 +2081,8 @@ impl RoosteApp {
                     }
                     crate::terminal_view::set_focus_pending(
                         ui.ctx(),
-                        self.tabs().any(|tab| tab.view.focus_requested),
+                        self.tabs().any(|tab| tab.view.focus_requested)
+                            || self.vault.as_ref().is_some_and(|v| v.modal.is_some()),
                     );
                     self.tree.ui(&mut behavior, ui);
                     self.follow_tab_switches();

@@ -55,16 +55,10 @@ fn e2e_managed_ssh_keys_import_browse_detail_generate_rename_delete() {
     rooste_ssh::fonts::install(&harness.ctx);
     settle(&mut harness);
 
-    // 1. Unlock the vault via Lock Screen modal.
-    {
-        let app = harness.state_mut();
-        let vault = app.vault.as_mut().unwrap();
-        if let Some(VaultModal::LockScreen(ref mut ls)) = vault.modal {
-            *ls.password = "Test-Master-Pass-1!".into();
-        }
-    }
-    settle(&mut harness);
-    harness.get_by_label("Unlock").click();
+    // 1. Unlock the vault via Lock Screen modal by typing directly without clicking
+    //    (verifies the master password input receives keyboard focus automatically on startup!).
+    harness.event(egui::Event::Text("Test-Master-Pass-1!".into()));
+    harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     assert!(harness.state().vault.as_ref().unwrap().unlocked);
 
