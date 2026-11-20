@@ -62,8 +62,10 @@ fn e2e_managed_ssh_keys_import_browse_detail_generate_rename_delete() {
     settle(&mut harness);
     assert!(harness.state().vault.as_ref().unwrap().unlocked);
 
-    // 2. Open Managed SSH Keys via toolbar button ("🔑 Keys").
-    harness.get_by_label("🔑 Keys").click();
+    // 2. Open Managed SSH Keys via Vault menu ("Vault" -> "Managed SSH Keys…").
+    harness.get_by_label("Vault").click();
+    settle(&mut harness);
+    harness.get_by_label_contains("Managed SSH Keys…").click();
     settle(&mut harness);
 
     // Since vault has 0 keys initially, right pane starts on Import.

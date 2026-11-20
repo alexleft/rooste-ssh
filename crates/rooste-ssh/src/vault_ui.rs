@@ -943,20 +943,6 @@ impl VaultController {
         }
 
         if ui
-            .button("🔑 Keys")
-            .on_hover_text("Manage first-class SSH keys stored in the encrypted vault")
-            .clicked()
-        {
-            self.open_keys_manager();
-        }
-        if ui
-            .button("☁ Vault")
-            .on_hover_text("Vault security, re-keying & sync backend settings")
-            .clicked()
-        {
-            self.open_sync_settings();
-        }
-        if ui
             .button("🔒 Lock")
             .on_hover_text("Lock vault and zeroize DEK in memory immediately")
             .clicked()
