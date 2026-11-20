@@ -479,6 +479,53 @@ impl SessionTab {
         find.focus = true;
     }
 
+    pub fn has_selection(&self) -> bool {
+        self.terminal
+            .selection_text()
+            .is_some_and(|t| !t.is_empty())
+    }
+
+    pub fn copy_selection(&mut self, ctx: &egui::Context) -> bool {
+        if let Some(text) = self.terminal.selection_text()
+            && !text.is_empty()
+        {
+            ctx.copy_text(text.clone());
+            self.view.flash_copied_banner(&text);
+            self.terminal.clear_selection();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn paste_from_clipboard(&mut self) {
+        if let Some(text) = crate::terminal_view::read_clipboard() {
+            self.paste_text(&text);
+        }
+    }
+
+    pub fn paste_text(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        self.terminal.scroll_to_bottom();
+        let encoded = rooste_terminal::input::encode_paste(text, self.terminal.bracketed_paste());
+        self.send_input(encoded);
+    }
+
+    pub fn open_multiline_paste(&mut self) {
+        self.view.multiline_paste =
+            Some(crate::terminal_view::read_clipboard().unwrap_or_default());
+    }
+
+    pub fn select_all(&mut self) {
+        self.terminal.select_all();
+    }
+
+    pub fn clear_scrollback(&mut self) {
+        self.terminal.clear_scrollback();
+    }
+
     fn find_ui(&mut self, ui: &mut Ui) {
         let Some(find) = &mut self.find else {
             return;

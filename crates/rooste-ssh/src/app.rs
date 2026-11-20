@@ -1805,6 +1805,41 @@ impl RoosteApp {
                     self.request_close(id);
                 }
             }
+            Command::Copy => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.copy_selection(ctx);
+                }
+            }
+            Command::Paste => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.paste_from_clipboard();
+                }
+            }
+            Command::MultilinePaste => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.open_multiline_paste();
+                }
+            }
+            Command::SelectAll => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.select_all();
+                }
+            }
+            Command::ClearScrollback => {
+                if let Some(id) = self.active_tab_id()
+                    && let Some(tab) = self.tab_mut(id)
+                {
+                    tab.clear_scrollback();
+                }
+            }
         }
     }
 
@@ -2187,12 +2222,31 @@ impl RoosteApp {
         let ctx = ui.ctx().clone();
         egui::Panel::top("menu").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
+                let has_tab = self.active_tab_id().is_some();
+
+                // 1. Session
                 ui.menu_button("Session", |ui| {
-                    if ui.button("New session…").clicked() {
+                    let new_hint = if cfg!(target_os = "macos") {
+                        "Cmd+N"
+                    } else {
+                        "Ctrl+N"
+                    };
+                    let quick_hint = if cfg!(target_os = "macos") {
+                        "Cmd+Shift+T"
+                    } else {
+                        "Ctrl+Shift+T"
+                    };
+                    if ui
+                        .add(egui::Button::new("New session…").shortcut_text(new_hint))
+                        .clicked()
+                    {
                         self.handle_manager(&ctx, ManagerAction::New);
                         ui.close();
                     }
-                    if ui.button("Quick connect…").clicked() {
+                    if ui
+                        .add(egui::Button::new("Quick connect…").shortcut_text(quick_hint))
+                        .clicked()
+                    {
                         self.dialog = Some(Dialog::QuickConnect);
                         ui.close();
                     }
@@ -2205,24 +2259,204 @@ impl RoosteApp {
                         self.import(false);
                         ui.close();
                     }
+                });
+
+                // 2. Edit
+                ui.menu_button("Edit", |ui| {
+                    let has_sel = self
+                        .active_tab_id()
+                        .and_then(|id| self.tab(id))
+                        .is_some_and(|tab| tab.has_selection());
+
+                    let copy_hint = if cfg!(target_os = "macos") {
+                        "Cmd+C"
+                    } else {
+                        "Ctrl+Shift+C"
+                    };
+                    let paste_hint = if cfg!(target_os = "macos") {
+                        "Cmd+V"
+                    } else if self.config.settings.ctrl_v_paste {
+                        "Ctrl+V"
+                    } else {
+                        "Ctrl+Shift+V"
+                    };
+                    let select_all_hint = if cfg!(target_os = "macos") {
+                        "Cmd+A"
+                    } else {
+                        "Ctrl+Shift+A"
+                    };
+                    let find_hint = if cfg!(target_os = "macos") {
+                        "Cmd+Shift+F"
+                    } else {
+                        "Ctrl+Shift+F"
+                    };
+                    let settings_hint = if cfg!(target_os = "macos") {
+                        "Cmd+,"
+                    } else {
+                        "Ctrl+,"
+                    };
+
+                    if ui
+                        .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text(copy_hint))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::Copy);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            has_tab,
+                            egui::Button::new("Paste").shortcut_text(paste_hint),
+                        )
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::Paste);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new("Multi-line Paste…"))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::MultilinePaste);
+                        ui.close();
+                    }
                     ui.separator();
-                    if ui.button("Settings…").clicked() {
+                    if ui
+                        .add_enabled(
+                            has_tab,
+                            egui::Button::new("Select All").shortcut_text(select_all_hint),
+                        )
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::SelectAll);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            has_tab,
+                            egui::Button::new("Find in terminal…").shortcut_text(find_hint),
+                        )
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::Find);
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new("Clear Scrollback"))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::ClearScrollback);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .add(egui::Button::new("Settings…").shortcut_text(settings_hint))
+                        .clicked()
+                    {
                         self.dialog = Some(Dialog::Settings(SettingsEditor {
                             settings: self.config.settings.clone(),
                         }));
                         ui.close();
                     }
                 });
+
+                // 3. View
+                ui.menu_button("View", |ui| {
+                    if ui
+                        .checkbox(&mut self.show_manager, "Session manager")
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                    let palette_hint = if cfg!(target_os = "macos") {
+                        "Cmd+Shift+P"
+                    } else {
+                        "Ctrl+Shift+P"
+                    };
+                    if ui
+                        .add(egui::Button::new("Command palette…").shortcut_text(palette_hint))
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::Palette {
+                            query: String::new(),
+                        });
+                        ui.close();
+                    }
+                    ui.separator();
+                    for (label, shortcut, command) in [
+                        ("Zoom in", "Ctrl +", Command::ZoomIn),
+                        ("Zoom out", "Ctrl −", Command::ZoomOut),
+                        ("Reset zoom", "Ctrl 0", Command::ResetZoom),
+                    ] {
+                        let button = egui::Button::new(label).shortcut_text(shortcut);
+                        if ui.add_enabled(has_tab, button).clicked() {
+                            self.run_command(&ctx, command);
+                            ui.close();
+                        }
+                    }
+                });
+
+                // 4. Tab
                 ui.menu_button("Tab", |ui| {
-                    let has_tab = self.active_tab_id().is_some();
+                    for (label, command) in [
+                        ("Duplicate tab", Command::DuplicateTab),
+                        ("Split right", Command::SplitRight),
+                        ("Split down", Command::SplitDown),
+                    ] {
+                        if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
+                            self.run_command(&ctx, command);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui
+                        .checkbox(&mut self.broadcast, "Broadcast input to all tabs")
+                        .clicked()
+                    {
+                        self.broadcast = !self.broadcast;
+                        self.toggle_broadcast();
+                        ui.close();
+                    }
+                    if self.has_active_tmux() {
+                        ui.separator();
+                        if ui.button("tmux: New window").clicked() {
+                            self.run_command(&ctx, Command::TmuxNewWindow);
+                            ui.close();
+                        }
+                        if ui.button("tmux: Synchronize panes").clicked() {
+                            self.run_command(&ctx, Command::TmuxToggleSyncPanes);
+                            ui.close();
+                        }
+                        if ui.button("tmux: Detach session").clicked() {
+                            self.run_command(&ctx, Command::TmuxDetach);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    let close_hint = if cfg!(target_os = "macos") {
+                        "Cmd+Shift+W"
+                    } else {
+                        "Ctrl+Shift+W"
+                    };
                     if ui
                         .add_enabled(
                             has_tab,
-                            egui::Button::new("Find…").shortcut_text("Ctrl+Shift+F"),
+                            egui::Button::new("Close tab").shortcut_text(close_hint),
                         )
                         .clicked()
                     {
-                        self.run_command(&ctx, Command::Find);
+                        self.run_command(&ctx, Command::CloseTab);
+                        ui.close();
+                    }
+                });
+
+                // 5. Tools
+                ui.menu_button("Tools", |ui| {
+                    if ui
+                        .add_enabled(has_tab, egui::Button::new("Files (SFTP)"))
+                        .clicked()
+                    {
+                        self.run_command(&ctx, Command::ToggleFiles);
                         ui.close();
                     }
                     let logging = self
@@ -2257,50 +2491,36 @@ impl RoosteApp {
                         self.run_command(&ctx, Command::ToggleRecording);
                         ui.close();
                     }
-                    for (label, command) in [
-                        ("Files (SFTP)", Command::ToggleFiles),
-                        ("Duplicate tab", Command::DuplicateTab),
-                        ("Split right", Command::SplitRight),
-                        ("Split down", Command::SplitDown),
-                    ] {
-                        if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
-                            self.run_command(&ctx, command);
-                            ui.close();
-                        }
-                    }
-                    if ui
-                        .checkbox(&mut self.broadcast, "Broadcast input to all tabs")
-                        .clicked()
-                    {
-                        self.broadcast = !self.broadcast;
-                        self.toggle_broadcast();
-                        ui.close();
-                    }
-                    if self.has_active_tmux() {
-                        ui.separator();
-                        if ui.button("tmux: New window").clicked() {
-                            self.run_command(&ctx, Command::TmuxNewWindow);
-                            ui.close();
-                        }
-                        if ui.button("tmux: Synchronize panes").clicked() {
-                            self.run_command(&ctx, Command::TmuxToggleSyncPanes);
-                            ui.close();
-                        }
-                        if ui.button("tmux: Detach session").clicked() {
-                            self.run_command(&ctx, Command::TmuxDetach);
-                            ui.close();
-                        }
-                    }
+                    let scripts_dir = self.scripts_dir();
+                    ui.add_enabled_ui(has_tab, |ui| {
+                        ui.menu_button("Run script", |ui| {
+                            let scripts = scripts_dir
+                                .as_deref()
+                                .map(crate::scripting::list_scripts)
+                                .unwrap_or_default();
+                            if scripts.is_empty() {
+                                ui.weak("No scripts yet");
+                            }
+                            for name in scripts {
+                                if ui.button(&name).clicked() {
+                                    self.run_command(&ctx, Command::RunScript(name.clone()));
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("Open scripts folder").clicked() {
+                                self.open_scripts_folder();
+                                ui.close();
+                            }
+                        });
+                    });
                     ui.separator();
-                    if ui
-                        .add_enabled(has_tab, egui::Button::new("Close tab"))
-                        .clicked()
-                    {
-                        self.run_command(&ctx, Command::CloseTab);
+                    if ui.button("SSH agent…").clicked() {
+                        let mut window = AgentWindow::default();
+                        self.agent_action(&mut window, AgentAction::Refresh);
+                        self.dialog = Some(Dialog::Agent(Box::new(window)));
                         ui.close();
                     }
-                });
-                ui.menu_button("Tools", |ui| {
                     if ui.button("Key generator…").clicked() {
                         self.dialog = Some(Dialog::KeyGenerator(Box::default()));
                         ui.close();
@@ -2309,57 +2529,12 @@ impl RoosteApp {
                         self.dialog = Some(Dialog::KeyConverter(Box::default()));
                         ui.close();
                     }
-                    if ui.button("SSH agent…").clicked() {
-                        let mut window = AgentWindow::default();
-                        self.agent_action(&mut window, AgentAction::Refresh);
-                        self.dialog = Some(Dialog::Agent(Box::new(window)));
-                        ui.close();
-                    }
                 });
-                ui.menu_button("View", |ui| {
-                    if ui
-                        .checkbox(&mut self.show_manager, "Session manager")
-                        .clicked()
-                    {
-                        ui.close();
-                    }
-                    if ui.button("Command palette…").clicked() {
-                        self.dialog = Some(Dialog::Palette {
-                            query: String::new(),
-                        });
-                        ui.close();
-                    }
-                    ui.separator();
-                    let has_tab = self.active_tab_id().is_some();
-                    for (label, shortcut, command) in [
-                        ("Zoom in", "Ctrl +", Command::ZoomIn),
-                        ("Zoom out", "Ctrl −", Command::ZoomOut),
-                        ("Reset zoom", "Ctrl 0", Command::ResetZoom),
-                    ] {
-                        let button = egui::Button::new(label).shortcut_text(shortcut);
-                        if ui.add_enabled(has_tab, button).clicked() {
-                            self.run_command(&ctx, command);
-                            ui.close();
-                        }
-                    }
-                });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Check for updates").clicked() {
-                        self.check_for_updates(true);
-                        ui.close();
-                    }
-                    if ui.button("Project page").clicked() {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(
-                            "https://github.com/rooste-ssh/rooste-ssh",
-                        ));
-                        ui.close();
-                    }
-                    ui.separator();
-                    ui.weak(format!("Rooste SSH {}", env!("CARGO_PKG_VERSION")));
-                });
+
+                // 6. Vault (Before Help!)
+                let mut toolbar_actions = Vec::new();
                 if self.vault.is_some() {
                     let has_legacy_profiles = !self.config.profiles.is_empty();
-                    let mut toolbar_actions = Vec::new();
                     ui.menu_button("Vault", |ui| {
                         if let Some(ref mut vault) = self.vault {
                             if !vault.enabled {
@@ -2395,13 +2570,45 @@ impl RoosteApp {
                             }
                         }
                     });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if let Some(ref mut vault) = self.vault {
-                            toolbar_actions.extend(vault.toolbar_ui(ui));
-                        }
-                    });
-                    self.apply_vault_actions(toolbar_actions);
                 }
+
+                // 7. Help (Always last!)
+                ui.menu_button("Help", |ui| {
+                    if ui.button("Check for updates").clicked() {
+                        self.check_for_updates(true);
+                        ui.close();
+                    }
+                    if ui.button("Project page").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(
+                            "https://github.com/rooste-ssh/rooste-ssh",
+                        ));
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.weak(format!("Rooste SSH {}", env!("CARGO_PKG_VERSION")));
+                });
+
+                // Top right toolbar: Settings button + Vault buttons
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let settings_hint = if cfg!(target_os = "macos") {
+                        "Cmd+,"
+                    } else {
+                        "Ctrl+,"
+                    };
+                    if ui
+                        .button("⚙ Settings")
+                        .on_hover_text(format!("Preferences ({settings_hint})"))
+                        .clicked()
+                    {
+                        self.dialog = Some(Dialog::Settings(SettingsEditor {
+                            settings: self.config.settings.clone(),
+                        }));
+                    }
+                    if let Some(ref mut vault) = self.vault {
+                        toolbar_actions.extend(vault.toolbar_ui(ui));
+                    }
+                });
+                self.apply_vault_actions(toolbar_actions);
             });
         });
     }
@@ -2712,8 +2919,21 @@ impl RoosteApp {
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
-        // Ctrl+Shift on Linux and Windows, ⌘⇧ on macOS.
+        let cmd = Modifiers::COMMAND;
         let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+
+        // Cmd+, on macOS, Ctrl+, on Windows/Linux -> Settings
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::Comma))) {
+            self.dialog = Some(Dialog::Settings(SettingsEditor {
+                settings: self.config.settings.clone(),
+            }));
+        }
+
+        // Cmd+N on macOS, Ctrl+N on Windows/Linux -> New Session
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, Key::N))) {
+            self.handle_manager(ctx, ManagerAction::New);
+        }
+
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(ctrl_shift, Key::T))) {
             self.dialog = Some(Dialog::QuickConnect);
         }
@@ -2735,10 +2955,15 @@ impl RoosteApp {
         use egui::{Key, KeyboardShortcut, Modifiers};
         // egui would zoom the whole interface on these keys.
         ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        let pressed = |key| {
-            ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key)))
-        };
-        let find = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::F);
+        let cmd = Modifiers::COMMAND;
+        let pressed = |key| ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd, key)));
+        if pressed(Key::Comma) {
+            self.run_command(ctx, Command::Settings);
+        }
+        if pressed(Key::N) {
+            self.run_command(ctx, Command::NewSession);
+        }
+        let find = KeyboardShortcut::new(cmd | Modifiers::SHIFT, Key::F);
         if ctx.input_mut(|i| i.consume_shortcut(&find)) {
             self.run_command(ctx, Command::Find);
         }

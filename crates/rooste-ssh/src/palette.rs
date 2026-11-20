@@ -32,6 +32,11 @@ pub enum Command {
     TmuxNewWindow,
     TmuxDetach,
     TmuxToggleSyncPanes,
+    Copy,
+    Paste,
+    MultilinePaste,
+    SelectAll,
+    ClearScrollback,
 }
 
 /// Available commands with their labels.
@@ -72,6 +77,11 @@ pub fn commands_with_tmux(
     ]);
     if has_tab {
         list.extend([
+            ("Copy selection".to_owned(), Command::Copy),
+            ("Paste from clipboard".to_owned(), Command::Paste),
+            ("Multi-line paste…".to_owned(), Command::MultilinePaste),
+            ("Select all".to_owned(), Command::SelectAll),
+            ("Clear scrollback".to_owned(), Command::ClearScrollback),
             ("Find in terminal…".to_owned(), Command::Find),
             ("Files (SFTP)".to_owned(), Command::ToggleFiles),
             ("Start or stop logging".to_owned(), Command::ToggleLog),

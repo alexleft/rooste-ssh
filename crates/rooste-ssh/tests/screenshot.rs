@@ -199,7 +199,7 @@ fn render_dialogs() {
         ("update-banner", &[]),
         ("welcome-light", &[]),
         ("profile-editor", &["Session", "New session…"]),
-        ("settings", &["Session", "Settings…"]),
+        ("settings", &["Edit", "Settings…"]),
         ("key-generator", &["Tools", "Key generator…"]),
     ];
     for (name, clicks) in shots {

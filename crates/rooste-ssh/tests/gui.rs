@@ -161,7 +161,7 @@ fn type_into(harness: &mut Harness<'_, RoosteApp>, label: &str, text: &str) {
 fn open_menu_item(harness: &mut Harness<'_, RoosteApp>, menu: &str, item: &str) {
     harness.get_by_label(menu).click();
     settle(harness);
-    harness.get_by_label(item).click();
+    harness.get_by_label_contains(item).click();
     settle(harness);
 }
 
@@ -486,7 +486,7 @@ fn import_from_ssh_config_and_putty() {
 fn settings_are_saved_and_applied() {
     let f = Fixture::new();
     let mut harness = harness(f.app(Config::default()));
-    open_menu_item(&mut harness, "Session", "Settings…");
+    open_menu_item(&mut harness, "Edit", "Settings…");
     assert!(matches!(harness.state().dialog, Some(Dialog::Settings(_))));
     harness.get_by_label("Light").click();
     settle(&mut harness);
@@ -873,7 +873,7 @@ fn sessions_are_logged_as_plain_text() {
     assert!(!text.contains('\x1b') && !text.contains('\r'), "{text:?}");
 
     // Stop logging: later output stays out of the file.
-    open_menu_item(&mut harness, "Tab", "Stop logging");
+    open_menu_item(&mut harness, "Tools", "Stop logging");
     harness.event(egui::Event::Text("not logged".into()));
     harness.key_press(egui::Key::Enter);
     wait_for(&mut harness, "echo", |app| {
@@ -884,7 +884,7 @@ fn sessions_are_logged_as_plain_text() {
     // Start again by hand, choosing the file.
     let manual = f.dir.path().join("manual.log");
     harness.state_mut().picker.fake_answer = Some(manual.clone());
-    open_menu_item(&mut harness, "Tab", "Start logging…");
+    open_menu_item(&mut harness, "Tools", "Start logging…");
     settle(&mut harness);
     harness.event(egui::Event::Text("by hand".into()));
     harness.key_press(egui::Key::Enter);
@@ -903,7 +903,7 @@ fn sessions_can_be_recorded_for_playback() {
 
     let cast = f.dir.path().join("one.cast");
     harness.state_mut().picker.fake_answer = Some(cast.clone());
-    open_menu_item(&mut harness, "Tab", "Record session…");
+    open_menu_item(&mut harness, "Tools", "Record session…");
     settle(&mut harness);
     assert!(first_tab(harness.state()).unwrap().title().contains('🔘'));
     harness.event(egui::Event::Text("on tape".into()));
@@ -923,7 +923,7 @@ fn sessions_can_be_recorded_for_playback() {
     // What the user typed is not recorded as input; only the echo is output.
     assert!(!events.iter().any(|e| e[1] == "i"));
 
-    open_menu_item(&mut harness, "Tab", "Stop recording");
+    open_menu_item(&mut harness, "Tools", "Stop recording");
     assert!(first_tab(harness.state()).unwrap().recording.is_none());
 }
 
@@ -1545,7 +1545,7 @@ fn file_panel_browse_transfer_and_manage() {
     context_menu(&mut harness, "files", "Connect");
     wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
 
-    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    open_menu_item(&mut harness, "Tools", "Files (SFTP)");
     wait_for(&mut harness, "listing", |app| {
         files_entries(app) == ["logs", "notes.txt"]
     });
@@ -1636,7 +1636,7 @@ fn file_panel_downloads_folders_and_selections_to_a_chosen_folder() {
     let mut harness = harness(app);
     context_menu(&mut harness, "files", "Connect");
     wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
-    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    open_menu_item(&mut harness, "Tools", "Files (SFTP)");
     wait_for(&mut harness, "listing", |app| files_entries(app).len() == 4);
 
     // A folder downloads with everything in it.
@@ -1705,7 +1705,7 @@ fn file_panel_uploads_folders() {
     let mut harness = harness(app);
     context_menu(&mut harness, "files", "Connect");
     wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
-    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    open_menu_item(&mut harness, "Tools", "Files (SFTP)");
     wait_for(&mut harness, "listing", |app| {
         first_tab(app)
             .and_then(|t| t.files.as_ref())
@@ -1880,7 +1880,7 @@ fn telnet_session_reports_window_size() {
     });
 
     // File transfer is SSH-only.
-    open_menu_item(&mut harness, "Tab", "Files (SFTP)");
+    open_menu_item(&mut harness, "Tools", "Files (SFTP)");
     wait_for(&mut harness, "files refused", |app| {
         first_tab(app)
             .and_then(|t| t.files.as_ref())
@@ -1974,7 +1974,7 @@ fn terminal_context_menu_and_right_click_settings() {
     assert!(harness.state().config.settings.ctrl_v_paste);
 
     // Selecting Mode C (Classic PuTTY) in Settings auto-enables `copy_on_select`.
-    open_menu_item(&mut harness, "Session", "Settings…");
+    open_menu_item(&mut harness, "Edit", "Settings…");
     harness
         .get_by_label("Classic PuTTY (Paste directly + Copy on select)")
         .click();
@@ -2068,6 +2068,56 @@ fn terminal_context_menu_and_right_click_settings() {
     settle(&mut harness);
     harness.get_by_label("Multi-line Paste");
     harness.get_by_label("Paste as Single Line");
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
+}
+
+#[test]
+fn edit_menu_and_settings_toolbar_and_shortcuts() {
+    let f = Fixture::with_server();
+    let mut harness = harness(app_with(&f, vec![f.profile("one")]));
+    context_menu(&mut harness, "one", "Connect");
+    wait_for(&mut harness, "connected", |app| connected_count(app) == 1);
+    wait_for(&mut harness, "prompt", |app| screen_text(app).contains('$'));
+
+    // 1. Top toolbar `⚙ Settings` button opens settings dialog.
+    harness.get_by_label("⚙ Settings").click();
+    settle(&mut harness);
+    assert!(matches!(harness.state().dialog, Some(Dialog::Settings(_))));
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
+    assert!(harness.state().dialog.is_none());
+
+    // 2. Edit -> Select All selects terminal content.
+    open_menu_item(&mut harness, "Edit", "Select All");
+    settle(&mut harness);
+    assert!(
+        first_tab(harness.state())
+            .unwrap()
+            .terminal
+            .selection_text()
+            .is_some()
+    );
+
+    // 3. Edit -> Copy copies selection and clears selection.
+    open_menu_item(&mut harness, "Edit", "Copy");
+    settle(&mut harness);
+    assert!(
+        first_tab(harness.state())
+            .unwrap()
+            .terminal
+            .selection_text()
+            .is_none()
+    );
+
+    // 4. Edit -> Clear Scrollback clears scrollback history.
+    open_menu_item(&mut harness, "Edit", "Clear Scrollback");
+    settle(&mut harness);
+
+    // 5. Cmd+, / Ctrl+, shortcut opens Settings dialog.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Comma);
+    settle(&mut harness);
+    assert!(matches!(harness.state().dialog, Some(Dialog::Settings(_))));
     harness.get_by_label("Cancel").click();
     settle(&mut harness);
 }

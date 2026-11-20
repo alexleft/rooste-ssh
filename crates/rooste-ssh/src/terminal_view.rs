@@ -72,7 +72,7 @@ pub struct TerminalView {
     /// Brief "Copied" toast shown in the top-right corner of the terminal.
     copied_banner: Option<(String, Instant)>,
     /// Pending text inside the dedicated "Multi-line Paste…" preview modal.
-    multiline_paste: Option<String>,
+    pub multiline_paste: Option<String>,
     /// While dragging the scrollbar: where the thumb was grabbed, from its top.
     scrollbar_grab: Option<f32>,
     /// Take keyboard focus as soon as possible, e.g. when its tab is clicked.
@@ -264,18 +264,22 @@ impl TerminalView {
         out
     }
 
+    pub fn flash_copied_banner(&mut self, text: &str) {
+        let lines = text.lines().count().max(1);
+        let label = if lines > 1 {
+            format!("Copied {lines} lines")
+        } else {
+            "Copied".to_owned()
+        };
+        self.copied_banner = Some((label, Instant::now()));
+    }
+
     fn copy_selection(&mut self, ctx: &egui::Context, term: &mut Terminal, clear: bool) {
         if let Some(text) = term.selection_text()
             && !text.is_empty()
         {
-            let lines = text.lines().count().max(1);
-            let label = if lines > 1 {
-                format!("Copied {lines} lines")
-            } else {
-                "Copied".to_owned()
-            };
-            ctx.copy_text(text);
-            self.copied_banner = Some((label, Instant::now()));
+            ctx.copy_text(text.clone());
+            self.flash_copied_banner(&text);
         }
         if clear {
             term.clear_selection();
@@ -901,7 +905,7 @@ fn collapse_to_single_line(text: &str) -> String {
         .join(" ")
 }
 
-fn read_clipboard() -> Option<String> {
+pub(crate) fn read_clipboard() -> Option<String> {
     arboard::Clipboard::new()
         .and_then(|mut c| c.get_text())
         .ok()
