@@ -459,8 +459,11 @@ async fn dispatch_tmux_events<T: Transport>(
             MachineEvent::ProtocolLog(line) => {
                 sink.send(SessionEvent::TmuxProtocolLog(line));
             }
-            MachineEvent::Detached { reason } => {
+            MachineEvent::Detached { reason, trailing } => {
                 sink.send(SessionEvent::TmuxDetached { reason });
+                if !trailing.is_empty() {
+                    sink.send(SessionEvent::Output(trailing));
+                }
                 detached = true;
             }
         }
@@ -487,6 +490,10 @@ async fn handle_tmux_command<T: Transport>(
 ) -> Result<bool, Failure> {
     match command {
         SessionCommand::Input(data) => {
+            if tmux.is_some() {
+                // Ignore raw terminal input while in tmux control mode so control streams don't get corrupted.
+                return Ok(false);
+            }
             if let Err(e) = transport.write(&data).await {
                 return Err(Failure::lost(format!("Connection lost: {e}")));
             }
@@ -558,10 +565,25 @@ async fn handle_tmux_command<T: Transport>(
         }
         SessionCommand::TmuxAction(action) => {
             if let Some(machine) = tmux.as_mut() {
-                let cmd = action.to_command_string();
-                if !cmd.is_empty() {
-                    machine.register_user_command();
-                    write_raw_text(transport, &cmd).await?;
+                match action {
+                    TmuxClientAction::RawCommand { command } => {
+                        let lines: Vec<&str> = command
+                            .split(';')
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        for line in lines {
+                            machine.register_user_command();
+                            write_raw_text(transport, &format!("{line}\n")).await?;
+                        }
+                    }
+                    action => {
+                        let cmd = action.to_command_string();
+                        if !cmd.is_empty() {
+                            machine.register_user_command();
+                            write_raw_text(transport, &cmd).await?;
+                        }
+                    }
                 }
             }
         }
@@ -570,7 +592,7 @@ async fn handle_tmux_command<T: Transport>(
                 if force {
                     *tmux = None;
                     dcs.reset();
-                    write_raw_text(transport, "\ndetach-client\nstty sane\n").await?;
+                    write_raw_text(transport, "\nstty sane\n").await?;
                     sink.send(SessionEvent::TmuxDetached {
                         reason: Some("force-exited tmux control mode".to_owned()),
                     });
@@ -605,11 +627,7 @@ async fn pump<T: Transport>(
     let mut dcs = DcsDetector::new();
     let mut tmux: Option<TmuxMachine> = None;
     let mut client_size = (request.cols.max(80), request.rows.max(24));
-    let scrollback_capture = if request.tmux_scrollback_capture == 0 {
-        1_000
-    } else {
-        request.tmux_scrollback_capture
-    };
+    let scrollback_capture = request.tmux_scrollback_capture;
     let pause_after = if request.tmux_pause_after_secs == 0 {
         5
     } else {
@@ -776,11 +794,7 @@ async fn run_ssh(
     let mut dcs = DcsDetector::new();
     let mut tmux: Option<TmuxMachine> = None;
     let mut client_size = (request.cols.max(80), request.rows.max(24));
-    let scrollback_capture = if request.tmux_scrollback_capture == 0 {
-        1_000
-    } else {
-        request.tmux_scrollback_capture
-    };
+    let scrollback_capture = request.tmux_scrollback_capture;
     let pause_after = if request.tmux_pause_after_secs == 0 {
         5
     } else {
