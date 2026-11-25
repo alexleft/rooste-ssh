@@ -17,6 +17,39 @@ const PORTABLE_FILE_NAME: &str = "rooste-ssh.toml";
 const OLD_PORTABLE_FILE_NAME: &str = "rooste.toml";
 const PORTABLE_MARKER: &str = "portable";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Language {
+    #[default]
+    Auto,
+    En,
+    ZhCn,
+    ZhTw,
+    Ja,
+    Ko,
+    De,
+    Fr,
+    Es,
+    Ru,
+    PtBr,
+}
+
+impl Language {
+    pub const ALL: [Self; 11] = [
+        Self::Auto,
+        Self::En,
+        Self::ZhCn,
+        Self::ZhTw,
+        Self::Ja,
+        Self::Ko,
+        Self::De,
+        Self::Fr,
+        Self::Es,
+        Self::Ru,
+        Self::PtBr,
+    ];
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
@@ -52,6 +85,7 @@ pub struct Settings {
     /// (when disabled, `Ctrl+V` sends raw `^V` while `Ctrl+Shift+V` / `Shift+Insert` still paste).
     pub ctrl_v_paste: bool,
     pub theme: Theme,
+    pub language: Language,
     /// Ask before closing a tab with an active connection.
     pub confirm_close: bool,
     /// User name used when a profile leaves it empty.
@@ -86,6 +120,7 @@ impl Default for Settings {
             copy_on_select: false,
             ctrl_v_paste: true,
             theme: Theme::Dark,
+            language: Language::Auto,
             confirm_close: true,
             default_user: String::new(),
             auto_reconnect: true,
@@ -376,6 +411,20 @@ mod tests {
         assert!(text.contains("[settings]"));
         assert!(text.contains("[[profiles]]"));
         assert!(text.contains("protocol = \"telnet\""));
+    }
+
+    #[test]
+    fn language_defaults_to_auto_and_round_trips() {
+        let omitted: Config = toml::from_str("[settings]\nfont_size = 14.0\n").unwrap();
+        assert_eq!(omitted.settings.language, Language::Auto);
+
+        for lang in Language::ALL {
+            let mut config = Config::default();
+            config.settings.language = lang;
+            let text = toml::to_string_pretty(&config).unwrap();
+            let back: Config = toml::from_str(&text).unwrap();
+            assert_eq!(back.settings.language, lang);
+        }
     }
 
     #[test]

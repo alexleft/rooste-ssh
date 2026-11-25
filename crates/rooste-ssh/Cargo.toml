@@ -36,6 +36,7 @@ rooste-vault.workspace = true
 rfd.workspace = true
 rhai.workspace = true
 serde.workspace = true
+sys-locale.workspace = true
 tokio.workspace = true
 ureq.workspace = true
 zeroize.workspace = true

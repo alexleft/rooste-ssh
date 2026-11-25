@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use rooste_core::{Config, MemoryStore, Profile, Theme};
+use rooste_core::{Config, Language, MemoryStore, Profile, Theme};
 use rooste_protocols::ssh::known_hosts;
 use rooste_ssh::RoosteApp;
 use rooste_ssh::app::{Dialog, TabState};
@@ -69,7 +69,10 @@ impl Fixture {
         self.dir.path().join("known_hosts")
     }
 
-    fn app(&self, config: Config) -> RoosteApp {
+    fn app(&self, mut config: Config) -> RoosteApp {
+        if config.settings.language == Language::Auto {
+            config.settings.language = Language::En;
+        }
         RoosteApp::with_config(
             config,
             Some(self.config_path()),
@@ -103,9 +106,15 @@ fn settle(harness: &mut Harness<'_, RoosteApp>) {
 }
 
 fn harness(app: RoosteApp) -> Harness<'static, RoosteApp> {
-    Harness::builder()
+    static TEST_FONTS: std::sync::OnceLock<egui::FontDefinitions> = std::sync::OnceLock::new();
+    let h = Harness::builder()
         .with_size([1100.0, 800.0])
-        .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app)
+        .build_ui_state(|ui, app: &mut RoosteApp| app.show(ui), app);
+    let fonts = TEST_FONTS
+        .get_or_init(|| rooste_ssh::fonts::with_system_fallbacks(Default::default()).0)
+        .clone();
+    h.ctx.set_fonts(fonts);
+    h
 }
 
 fn first_tab(app: &RoosteApp) -> Option<&SessionTab> {

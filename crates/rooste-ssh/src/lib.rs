@@ -5,6 +5,7 @@ pub mod box_drawing;
 pub mod dialogs;
 pub mod files;
 pub mod fonts;
+pub mod i18n;
 pub mod keys;
 pub mod manager;
 pub mod palette;

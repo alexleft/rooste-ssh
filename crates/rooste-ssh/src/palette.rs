@@ -5,6 +5,7 @@ use egui::{Id, Modal};
 use rooste_core::Profile;
 
 use crate::dialogs::Decision;
+use crate::i18n::{tr, tr_fmt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -54,63 +55,64 @@ pub fn commands_with_tmux(
     let mut list: Vec<(String, Command)> = profiles
         .iter()
         .map(|p| {
+            let display = p.display_name();
             (
-                format!("Connect: {}", p.display_name()),
+                tr_fmt("Connect: {name}", &[("name", &display)]),
                 Command::Connect(p.id.clone()),
             )
         })
         .collect();
     list.sort_by_key(|(label, _)| label.to_lowercase());
     list.extend([
-        ("New session…".to_owned(), Command::NewSession),
-        ("Quick connect…".to_owned(), Command::QuickConnect),
-        ("Import from PuTTY".to_owned(), Command::ImportPutty),
+        (tr("New session…").to_owned(), Command::NewSession),
+        (tr("Quick connect…").to_owned(), Command::QuickConnect),
+        (tr("Import from PuTTY").to_owned(), Command::ImportPutty),
         (
-            "Import from ~/.ssh/config".to_owned(),
+            tr("Import from ~/.ssh/config").to_owned(),
             Command::ImportSshConfig,
         ),
-        ("Settings…".to_owned(), Command::Settings),
+        (tr("Settings…").to_owned(), Command::Settings),
         (
-            "Toggle session manager".to_owned(),
+            tr("Toggle session manager").to_owned(),
             Command::ToggleSessionManager,
         ),
     ]);
     if has_tab {
         list.extend([
-            ("Copy selection".to_owned(), Command::Copy),
-            ("Paste from clipboard".to_owned(), Command::Paste),
-            ("Multi-line paste…".to_owned(), Command::MultilinePaste),
-            ("Select all".to_owned(), Command::SelectAll),
-            ("Clear scrollback".to_owned(), Command::ClearScrollback),
-            ("Find in terminal…".to_owned(), Command::Find),
-            ("Files (SFTP)".to_owned(), Command::ToggleFiles),
-            ("Start or stop logging".to_owned(), Command::ToggleLog),
+            (tr("Copy selection").to_owned(), Command::Copy),
+            (tr("Paste from clipboard").to_owned(), Command::Paste),
+            (tr("Multi-line paste…").to_owned(), Command::MultilinePaste),
+            (tr("Select all").to_owned(), Command::SelectAll),
+            (tr("Clear scrollback").to_owned(), Command::ClearScrollback),
+            (tr("Find in terminal…").to_owned(), Command::Find),
+            (tr("Files (SFTP)").to_owned(), Command::ToggleFiles),
+            (tr("Start or stop logging").to_owned(), Command::ToggleLog),
             (
-                "Start or stop recording".to_owned(),
+                tr("Start or stop recording").to_owned(),
                 Command::ToggleRecording,
             ),
-            ("Duplicate tab".to_owned(), Command::DuplicateTab),
-            ("Split right".to_owned(), Command::SplitRight),
-            ("Split down".to_owned(), Command::SplitDown),
-            ("Zoom in".to_owned(), Command::ZoomIn),
-            ("Zoom out".to_owned(), Command::ZoomOut),
-            ("Reset zoom".to_owned(), Command::ResetZoom),
+            (tr("Duplicate tab").to_owned(), Command::DuplicateTab),
+            (tr("Split right").to_owned(), Command::SplitRight),
+            (tr("Split down").to_owned(), Command::SplitDown),
+            (tr("Zoom in").to_owned(), Command::ZoomIn),
+            (tr("Zoom out").to_owned(), Command::ZoomOut),
+            (tr("Reset zoom").to_owned(), Command::ResetZoom),
             (
-                "Toggle broadcast input".to_owned(),
+                tr("Toggle broadcast input").to_owned(),
                 Command::ToggleBroadcast,
             ),
-            ("Close tab".to_owned(), Command::CloseTab),
+            (tr("Close tab").to_owned(), Command::CloseTab),
         ]);
     }
     if has_tmux {
         list.extend([
-            ("tmux: New window".to_owned(), Command::TmuxNewWindow),
+            (tr("tmux: New window").to_owned(), Command::TmuxNewWindow),
             (
-                "tmux: Toggle synchronize panes".to_owned(),
+                tr("tmux: Toggle synchronize panes").to_owned(),
                 Command::TmuxToggleSyncPanes,
             ),
             (
-                "tmux: Detach session (keep running remotely)".to_owned(),
+                tr("tmux: Detach session (keep running remotely)").to_owned(),
                 Command::TmuxDetach,
             ),
         ]);
@@ -118,12 +120,15 @@ pub fn commands_with_tmux(
     if has_tab {
         list.extend(scripts.iter().map(|name| {
             (
-                format!("Run script: {name}"),
+                tr_fmt("Run script: {name}", &[("name", name)]),
                 Command::RunScript(name.clone()),
             )
         }));
     }
-    list.push(("Open scripts folder".to_owned(), Command::OpenScriptsFolder));
+    list.push((
+        tr("Open scripts folder").to_owned(),
+        Command::OpenScriptsFolder,
+    ));
     list
 }
 
@@ -152,10 +157,12 @@ pub fn show(
             let edit = ui.add(
                 egui::TextEdit::singleline(query)
                     .margin(crate::theme::FIELD_MARGIN)
-                    .hint_text("Type a command or session name")
+                    .hint_text(tr("Type a command or session name"))
                     .desired_width(f32::INFINITY),
             );
-            edit.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Command"));
+            edit.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Command"))
+            });
             edit.request_focus();
             let matches = filter(commands, query);
             if ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -168,7 +175,7 @@ pub fn show(
                 .max_height(300.0)
                 .show(ui, |ui| {
                     if matches.is_empty() {
-                        ui.weak("No matching commands");
+                        ui.weak(tr("No matching commands"));
                     }
                     for (label, command) in matches {
                         if ui.selectable_label(false, label).clicked() {

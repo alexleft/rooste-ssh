@@ -30,6 +30,7 @@ use rooste_vault::{
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
+use crate::i18n::{tr, tr_fmt};
 use crate::picker::{PickId, PickKind, Picker};
 use crate::theme;
 
@@ -759,7 +760,7 @@ impl VaultController {
         {
             actions.push(self.lock_now());
             actions.push(VaultUiAction::Notify {
-                text: "Vault auto-locked due to inactivity (DEK cleared from memory).".into(),
+                text: tr("Vault auto-locked due to inactivity (DEK cleared from memory).").into(),
                 error: false,
             });
             return actions;
@@ -792,8 +793,9 @@ impl VaultController {
                 SyncEvent::ConnectionTested(res) => {
                     if let Some(VaultModal::SyncSettings(st)) = &mut self.modal {
                         st.testing = false;
-                        st.test_result =
-                            Some(res.map(|()| "Connection & credentials verified.".to_owned()));
+                        st.test_result = Some(
+                            res.map(|()| tr("Connection & credentials verified.").to_owned()),
+                        );
                     }
                 }
                 SyncEvent::RemoteInspected(res) => {
@@ -816,9 +818,11 @@ impl VaultController {
                         self.unlocked = true;
                         self.sync_enabled = true;
                         self.modal = None;
-                        self.status = SyncStatus::Synced(format!(
-                            "Recovered {} items (seq {})",
-                            report.pulled, report.manifest_sequence
+                        let count = report.pulled.to_string();
+                        let seq = report.manifest_sequence.to_string();
+                        self.status = SyncStatus::Synced(tr_fmt(
+                            "Recovered {count} items (seq {seq})",
+                            &[("count", &count), ("seq", &seq)],
                         ));
                         self.refresh_managed_keys();
                         if let Ok(guard) = self.store.try_lock()
@@ -827,9 +831,9 @@ impl VaultController {
                             actions.push(VaultUiAction::ReloadProfiles(profiles));
                         }
                         actions.push(VaultUiAction::Notify {
-                            text: format!(
-                                "Vault recovered cleanly from remote ({} records).",
-                                report.pulled
+                            text: tr_fmt(
+                                "Vault recovered cleanly from remote ({count} records).",
+                                &[("count", &count)],
                             ),
                             error: false,
                         });
@@ -840,7 +844,10 @@ impl VaultController {
                             st.error = Some(err.clone());
                         }
                         actions.push(VaultUiAction::Notify {
-                            text: format!("Remote recovery failed (rolled back): {err}"),
+                            text: tr_fmt(
+                                "Remote recovery failed (rolled back): {err}",
+                                &[("err", &err)],
+                            ),
                             error: true,
                         });
                     }
@@ -861,10 +868,11 @@ impl VaultController {
                                 .iter()
                                 .map(|c| c.backup_name.as_str())
                                 .collect();
+                            let backups = names.join(", ");
                             actions.push(VaultUiAction::Notify {
-                                text: format!(
-                                    "Sync conflict resolved; backup(s) created: {}",
-                                    names.join(", ")
+                                text: tr_fmt(
+                                    "Sync conflict resolved; backup(s) created: {backups}",
+                                    &[("backups", &backups)],
                                 ),
                                 error: false,
                             });
@@ -873,7 +881,7 @@ impl VaultController {
                     Err(err) => {
                         self.status = SyncStatus::Error(err.clone());
                         actions.push(VaultUiAction::Notify {
-                            text: format!("Vault sync error: {err}"),
+                            text: tr_fmt("Vault sync error: {err}", &[("err", &err)]),
                             error: true,
                         });
                     }
@@ -881,8 +889,9 @@ impl VaultController {
                 SyncEvent::HeaderPushed(res) => {
                     if let Err(err) = res {
                         actions.push(VaultUiAction::Notify {
-                            text: format!(
-                                "Updated local vault.json, but remote header push failed: {err}"
+                            text: tr_fmt(
+                                "Updated local vault.json, but remote header push failed: {err}",
+                                &[("err", &err)],
                             ),
                             error: true,
                         });
@@ -899,8 +908,10 @@ impl VaultController {
         let mut actions = Vec::new();
         if !self.enabled {
             if ui
-                .button("🔒 Enable Vault")
-                .on_hover_text("Initialize SM4-GCM encrypted vault & multi-device sync")
+                .button(tr("🔒 Enable Vault"))
+                .on_hover_text(tr(
+                    "Initialize SM4-GCM encrypted vault & multi-device sync",
+                ))
                 .clicked()
             {
                 self.open_onboarding(false);
@@ -908,7 +919,7 @@ impl VaultController {
             return actions;
         }
         if !self.unlocked {
-            if theme::primary_button(ui, "🔒 Unlock Vault").clicked() {
+            if theme::primary_button(ui, tr("🔒 Unlock Vault")).clicked() {
                 self.modal = Some(VaultModal::LockScreen(LockScreenState::default()));
             }
             return actions;
@@ -921,13 +932,13 @@ impl VaultController {
                 ui.label(RichText::new(&p.stage).small().color(theme::DAWN_GOLD));
             }
             SyncStatus::Synced(summary) => {
-                if ui.button("⟳ Sync").on_hover_text(summary).clicked() {
+                if ui.button(tr("⟳ Sync")).on_hover_text(summary).clicked() {
                     self.trigger_sync_now();
                 }
             }
             SyncStatus::Error(err) => {
                 if ui
-                    .button(RichText::new("⚠ Sync Error").color(theme::DAWN_GOLD))
+                    .button(RichText::new(tr("⚠ Sync Error")).color(theme::DAWN_GOLD))
                     .on_hover_text(err)
                     .clicked()
                 {
@@ -935,7 +946,7 @@ impl VaultController {
                 }
             }
             SyncStatus::Idle => {
-                if ui.button("⟳ Sync").clicked() {
+                if ui.button(tr("⟳ Sync")).clicked() {
                     self.trigger_sync_now();
                 }
             }
@@ -943,8 +954,8 @@ impl VaultController {
         }
 
         if ui
-            .button("🔒 Lock")
-            .on_hover_text("Lock vault and zeroize DEK in memory immediately")
+            .button(tr("🔒 Lock"))
+            .on_hover_text(tr("Lock vault and zeroize DEK in memory immediately"))
             .clicked()
         {
             actions.push(self.lock_now());
@@ -974,15 +985,17 @@ impl VaultController {
                 egui::Modal::new(egui::Id::unique("vault-lock-screen"))
                     .frame(theme::dialog_frame(ctx))
                     .show(ctx, |ui| {
-                        ui.heading("🔒 Unlock Rooste Vault");
+                        ui.heading(tr("🔒 Unlock Rooste Vault"));
                         ui.add_space(6.0);
-                        ui.label("Enter your master password to decrypt the local SM4-GCM vault.");
+                        ui.label(tr(
+                            "Enter your master password to decrypt the local SM4-GCM vault.",
+                        ));
                         ui.add_space(6.0);
                         let edit = ui.add(
                             egui::TextEdit::singleline(&mut *state.password)
                                 .id_salt("vault_lock_screen_password")
                                 .password(true)
-                                .hint_text("Master password")
+                                .hint_text(tr("Master password"))
                                 .desired_width(theme::FIELD_WIDTH),
                         );
                         if state.needs_focus {
@@ -1000,7 +1013,7 @@ impl VaultController {
                         }
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if theme::primary_button(ui, "Unlock").clicked() || enter {
+                            if theme::primary_button(ui, tr("Unlock")).clicked() || enter {
                                 match self.unlock_with_password(&state.password) {
                                     Ok(profiles) => {
                                         keep_open = false;
@@ -1013,12 +1026,15 @@ impl VaultController {
                                     }
                                 }
                             }
-                            if ui.button("Forgot Password (24-Word Recovery)…").clicked() {
+                            if ui
+                                .button(tr("Forgot Password (24-Word Recovery)…"))
+                                .clicked()
+                            {
                                 next_modal = Some(VaultModal::ForgotPassword(
                                     ForgotPasswordState::default(),
                                 ));
                             }
-                            if ui.button("Reset & Re-sync…").clicked() {
+                            if ui.button(tr("Reset & Re-sync…")).clicked() {
                                 next_modal =
                                     Some(VaultModal::ForceWipeConfirm(ForceWipeState::default()));
                             }
@@ -1054,7 +1070,7 @@ impl VaultController {
             }
 
             VaultModal::ForceWipeConfirm(state) => {
-                egui::Window::new("⚠ Reset Local Vault & Force Re-sync")
+                egui::Window::new(tr("⚠ Reset Local Vault & Force Re-sync"))
                     .collapsible(false)
                     .resizable(false)
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -1062,19 +1078,17 @@ impl VaultController {
                     .show(ctx, |ui| {
                         ui.colored_label(
                             theme::DAWN_GOLD,
-                            "Warning: This discards all unpushed local changes, wipes local vault/ \
-                             (temporarily backed up until recovery succeeds), and pulls a fresh \
-                             snapshot from your remote backend using your 24-word mnemonic or master password.",
+                            tr("Warning: This discards all unpushed local changes, wipes local vault/ (temporarily backed up until recovery succeeds), and pulls a fresh snapshot from your remote backend using your 24-word mnemonic or master password."),
                         );
                         ui.add_space(8.0);
-                        ui.label("Type RESET to confirm:");
+                        ui.label(tr("Type RESET to confirm:"));
                         ui.text_edit_singleline(&mut state.confirm_word);
                         if let Some(ref err) = state.error {
                             ui.colored_label(ui.visuals().error_fg_color, err);
                         }
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr("Cancel")).clicked() {
                                 keep_open = false;
                                 if self.enabled && !self.unlocked {
                                     next_modal =
@@ -1083,7 +1097,8 @@ impl VaultController {
                             }
                             let ready = state.confirm_word.trim() == "RESET";
                             ui.add_enabled_ui(ready, |ui| {
-                                if theme::danger_button(ui, "Wipe & Re-sync from Remote").clicked()
+                                if theme::danger_button(ui, tr("Wipe & Re-sync from Remote"))
+                                    .clicked()
                                 {
                                     let form = self.current_sync_form();
                                     next_modal = Some(VaultModal::RemoteRecovery(
@@ -1147,9 +1162,9 @@ impl VaultController {
         actions: &mut Vec<VaultUiAction>,
     ) {
         let title = if state.migrating_legacy {
-            "🔒 Upgrade to Encrypted Vault (Legacy Migration)"
+            tr("🔒 Upgrade to Encrypted Vault (Legacy Migration)")
         } else {
-            "🔒 Initialize Rooste Encrypted Vault"
+            tr("🔒 Initialize Rooste Encrypted Vault")
         };
         let mut next_step: Option<OnboardingStep> = None;
         egui::Window::new(title)
@@ -1159,37 +1174,42 @@ impl VaultController {
             .frame(theme::dialog_frame(ctx))
             .show(ctx, |ui| match &mut state.step {
                 OnboardingStep::ChooseMode => {
-                    ui.label("Choose how to set up your SM4-GCM end-to-end encrypted vault:");
+                    ui.label(tr(
+                        "Choose how to set up your SM4-GCM end-to-end encrypted vault:",
+                    ));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if theme::primary_button(ui, "Create New Vault").clicked() {
+                        if theme::primary_button(ui, tr("Create New Vault")).clicked() {
                             next_step = Some(OnboardingStep::SetPassword);
                         }
-                        if ui.button("Recover from Remote Cloud…").clicked() {
+                        if ui.button(tr("Recover from Remote Cloud…")).clicked() {
                             *next_modal = Some(VaultModal::RemoteRecovery(
                                 RemoteRecoveryState::new(false, SyncFormState::default()),
                             ));
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             *keep_open = false;
                         }
                     });
                 }
 
                 OnboardingStep::SetPassword => {
-                    ui.label("Step 1/3: Set a strong Master Password (Argon2id + SM4-GCM).");
+                    ui.label(tr(
+                        "Step 1/3: Set a strong Master Password (Argon2id + SM4-GCM).",
+                    ));
                     if state.migrating_legacy {
+                        let count = legacy_config.profiles.len().to_string();
                         ui.label(
-                            RichText::new(format!(
-                                "Will migrate {} existing profile(s), deduplicate SSH keys, and back up config.toml.",
-                                legacy_config.profiles.len()
+                            RichText::new(tr_fmt(
+                                "Will migrate {count} existing profile(s), deduplicate SSH keys, and back up config.toml.",
+                                &[("count", &count)],
                             ))
                             .small()
                             .color(theme::DAWN_GOLD),
                         );
                     }
                     ui.add_space(6.0);
-                    ui.label("Master Password:");
+                    ui.label(tr("Master Password:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.password)
                             .password(true)
@@ -1198,15 +1218,15 @@ impl VaultController {
                     let score = password_strength_score(&state.password);
                     let (label, color) = match score {
                         0 => ("", Color32::GRAY),
-                        1 => ("Strength: Weak", Color32::from_rgb(220, 70, 70)),
-                        2 => ("Strength: Fair", theme::DAWN_GOLD),
-                        3 => ("Strength: Good", theme::TERMINAL_CYAN),
-                        _ => ("Strength: Strong", Color32::from_rgb(80, 200, 120)),
+                        1 => (tr("Strength: Weak"), Color32::from_rgb(220, 70, 70)),
+                        2 => (tr("Strength: Fair"), theme::DAWN_GOLD),
+                        3 => (tr("Strength: Good"), theme::TERMINAL_CYAN),
+                        _ => (tr("Strength: Strong"), Color32::from_rgb(80, 200, 120)),
                     };
                     if !label.is_empty() {
                         ui.colored_label(color, label);
                     }
-                    ui.label("Confirm Master Password:");
+                    ui.label(tr("Confirm Master Password:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.confirm_password)
                             .password(true)
@@ -1217,15 +1237,16 @@ impl VaultController {
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             *keep_open = false;
                         }
-                        if theme::primary_button(ui, "Generate 24-Word Mnemonic →").clicked() {
+                        if theme::primary_button(ui, tr("Generate 24-Word Mnemonic →")).clicked() {
                             if state.password.len() < 8 {
-                                state.error =
-                                    Some("Master password must be at least 8 characters.".into());
+                                state.error = Some(
+                                    tr("Master password must be at least 8 characters.").into(),
+                                );
                             } else if *state.password != *state.confirm_password {
-                                state.error = Some("Master passwords do not match.".into());
+                                state.error = Some(tr("Master passwords do not match.").into());
                             } else {
                                 match rooste_vault::generate_mnemonic() {
                                     Ok((_, mnemonic)) => {
@@ -1248,12 +1269,12 @@ impl VaultController {
                     revealed,
                     copied_at,
                 } => {
-                    ui.label(
+                    ui.label(tr(
                         "Step 2/3: Write down your 24-word BIP-39 Recovery Mnemonic offline.",
-                    );
+                    ));
                     ui.colored_label(
                         theme::DAWN_GOLD,
-                        "This is the ONLY way to recover your vault if you forget your master password.",
+                        tr("This is the ONLY way to recover your vault if you forget your master password."),
                     );
                     ui.add_space(8.0);
                     let words: Vec<&str> = mnemonic.split_whitespace().collect();
@@ -1277,25 +1298,34 @@ impl VaultController {
                         });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        let toggle = if *revealed { "Hide Words" } else { "Show Words" };
+                        let toggle = if *revealed {
+                            tr("Hide Words")
+                        } else {
+                            tr("Show Words")
+                        };
                         if ui.button(toggle).clicked() {
                             *revealed = !*revealed;
                         }
-                        if ui.button("Copy (Auto-clears in 30s)").clicked() {
+                        if ui.button(tr("Copy (Auto-clears in 30s)")).clicked() {
                             ctx.copy_text(mnemonic.as_str().to_owned());
                             *copied_at = Some(Instant::now());
                             self.clipboard_clear_at = Some(Instant::now() + Duration::from_secs(30));
                         }
                         if copied_at.is_some() {
-                            ui.label(RichText::new("Copied!").small().color(theme::TERMINAL_CYAN));
+                            ui.label(
+                                RichText::new(tr("Copied!"))
+                                    .small()
+                                    .color(theme::TERMINAL_CYAN),
+                            );
                         }
                     });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("← Back").clicked() {
+                        if ui.button(tr("← Back")).clicked() {
                             next_step = Some(OnboardingStep::SetPassword);
                         }
-                        if theme::primary_button(ui, "I Have Written It Down → Verify").clicked() {
+                        if theme::primary_button(ui, tr("I Have Written It Down → Verify")).clicked()
+                        {
                             let phrase = mnemonic.clone();
                             let quiz_indices = pick_three_quiz_indices();
                             next_step = Some(OnboardingStep::VerifyMnemonic {
@@ -1312,8 +1342,10 @@ impl VaultController {
                     quiz_indices,
                     answers,
                 } => {
-                    ui.label("Step 3/3: Mandatory Backup Verification (cannot skip).");
-                    ui.label("Enter the requested words from your 24-word mnemonic:");
+                    ui.label(tr(
+                        "Step 3/3: Mandatory Backup Verification (cannot skip).",
+                    ));
+                    ui.label(tr("Enter the requested words from your 24-word mnemonic:"));
                     ui.add_space(6.0);
                     let words: Vec<&str> = mnemonic.split_whitespace().collect();
                     egui::Grid::new("mnemonic_verify_grid")
@@ -1321,7 +1353,8 @@ impl VaultController {
                         .spacing(theme::FORM_SPACING)
                         .show(ui, |ui| {
                             for (slot, &word_idx) in quiz_indices.iter().enumerate() {
-                                ui.label(format!("Word #{}", word_idx + 1));
+                                let num = (word_idx + 1).to_string();
+                                ui.label(tr_fmt("Word #{num}", &[("num", &num)]));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut answers[slot])
                                         .desired_width(180.0),
@@ -1334,7 +1367,7 @@ impl VaultController {
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("← Review Words").clicked() {
+                        if ui.button(tr("← Review Words")).clicked() {
                             let phrase = mnemonic.clone();
                             state.error = None;
                             next_step = Some(OnboardingStep::ShowMnemonic {
@@ -1343,7 +1376,7 @@ impl VaultController {
                                 copied_at: None,
                             });
                         }
-                        if theme::primary_button(ui, "Verify & Create Vault").clicked() {
+                        if theme::primary_button(ui, tr("Verify & Create Vault")).clicked() {
                             let all_match = quiz_indices.iter().enumerate().all(|(slot, &idx)| {
                                 words
                                     .get(idx)
@@ -1351,7 +1384,7 @@ impl VaultController {
                             });
                             if !all_match {
                                 state.error = Some(
-                                    "One or more verification words do not match. Please double-check your backup."
+                                    tr("One or more verification words do not match. Please double-check your backup.")
                                         .into(),
                                 );
                             } else {
@@ -1383,7 +1416,9 @@ impl VaultController {
                 }
 
                 OnboardingStep::OptionalSync => {
-                    ui.label("Vault initialized & unlocked! Optionally configure cloud sync:");
+                    ui.label(tr(
+                        "Vault initialized & unlocked! Optionally configure cloud sync:",
+                    ));
                     ui.add_space(6.0);
                     render_sync_form_fields(ui, &mut state.sync_form);
                     if let Some(ref err) = state.error {
@@ -1391,10 +1426,10 @@ impl VaultController {
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Skip for Now").clicked() {
+                        if ui.button(tr("Skip for Now")).clicked() {
                             *keep_open = false;
                         }
-                        if theme::primary_button(ui, "Save & Initial Sync").clicked() {
+                        if theme::primary_button(ui, tr("Save & Initial Sync")).clicked() {
                             match self.save_sync_form(&state.sync_form) {
                                 Ok(()) => {
                                     *keep_open = false;
@@ -1418,9 +1453,9 @@ impl VaultController {
         keep_open: &mut bool,
     ) {
         let title = if state.wipe_existing {
-            "⟳ Wipe & Recover Vault from Remote"
+            tr("⟳ Wipe & Recover Vault from Remote")
         } else {
-            "☁ Recover Existing Vault from Remote"
+            tr("☁ Recover Existing Vault from Remote")
         };
         egui::Window::new(title)
             .collapsible(false)
@@ -1429,7 +1464,9 @@ impl VaultController {
             .frame(theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 if state.snapshot.is_none() {
-                    ui.label("Step 1/2: Connect to your remote sync backend to fetch vault.json:");
+                    ui.label(tr(
+                        "Step 1/2: Connect to your remote sync backend to fetch vault.json:",
+                    ));
                     ui.add_space(6.0);
                     render_sync_form_fields(ui, &mut state.sync_form);
                     if let Some(ref err) = state.error {
@@ -1437,11 +1474,11 @@ impl VaultController {
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             *keep_open = false;
                         }
                         ui.add_enabled_ui(!state.busy, |ui| {
-                            if theme::primary_button(ui, "Connect & Inspect Remote").clicked() {
+                            if theme::primary_button(ui, tr("Connect & Inspect Remote")).clicked() {
                                 state.busy = true;
                                 state.error = None;
                                 let cfg = state.sync_form.to_sync_config(&SyncConfig::default());
@@ -1461,25 +1498,28 @@ impl VaultController {
                         .map(|s| s.header.vault_id.clone())
                         .unwrap_or_default();
                     ui.label(
-                        RichText::new(format!("Remote Vault Detected: {vault_id}"))
-                            .color(theme::TERMINAL_CYAN),
+                        RichText::new(tr_fmt(
+                            "Remote Vault Detected: {id}",
+                            &[("id", &vault_id)],
+                        ))
+                        .color(theme::TERMINAL_CYAN),
                     );
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.selectable_value(
                             &mut state.use_mnemonic,
                             false,
-                            "Unlock with Master Password",
+                            tr("Unlock with Master Password"),
                         );
                         ui.selectable_value(
                             &mut state.use_mnemonic,
                             true,
-                            "Recover with 24-Word Mnemonic",
+                            tr("Recover with 24-Word Mnemonic"),
                         );
                     });
                     ui.add_space(6.0);
                     if !state.use_mnemonic {
-                        ui.label("Master Password:");
+                        ui.label(tr("Master Password:"));
                         ui.add(
                             egui::TextEdit::singleline(&mut *state.password)
                                 .password(true)
@@ -1488,16 +1528,16 @@ impl VaultController {
                     } else {
                         render_mnemonic_input_with_suggestions(ui, &mut state.mnemonic_input);
                         ui.add_space(4.0);
-                        ui.label(
+                        ui.label(tr(
                             "Set New Master Password (optional; leave blank to keep current):",
-                        );
+                        ));
                         ui.add(
                             egui::TextEdit::singleline(&mut *state.new_password)
                                 .password(true)
                                 .desired_width(theme::FIELD_WIDTH),
                         );
                         if !state.new_password.is_empty() {
-                            ui.label("Confirm New Master Password:");
+                            ui.label(tr("Confirm New Master Password:"));
                             ui.add(
                                 egui::TextEdit::singleline(&mut *state.confirm_new_password)
                                     .password(true)
@@ -1511,12 +1551,12 @@ impl VaultController {
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("← Back").clicked() {
+                        if ui.button(tr("← Back")).clicked() {
                             state.snapshot = None;
                             state.error = None;
                         }
                         ui.add_enabled_ui(!state.busy, |ui| {
-                            if theme::primary_button(ui, "Decrypt & Pull Vault").clicked() {
+                            if theme::primary_button(ui, tr("Decrypt & Pull Vault")).clicked() {
                                 let Some(snap) = state.snapshot.clone() else {
                                     return;
                                 };
@@ -1529,12 +1569,12 @@ impl VaultController {
                                 {
                                     if state.new_password.len() < 8 {
                                         state.error = Some(
-                                            "New password must be at least 8 characters.".into(),
+                                            tr("New password must be at least 8 characters.").into(),
                                         );
                                         return;
                                     }
                                     if *state.new_password != *state.confirm_new_password {
-                                        state.error = Some("New passwords do not match.".into());
+                                        state.error = Some(tr("New passwords do not match.").into());
                                         return;
                                     }
                                     Some(state.new_password.clone())
@@ -1577,23 +1617,25 @@ impl VaultController {
         next_modal: &mut Option<VaultModal>,
         actions: &mut Vec<VaultUiAction>,
     ) {
-        egui::Window::new("🔑 Reset Master Password via 24-Word Mnemonic")
+        egui::Window::new(tr("🔑 Reset Master Password via 24-Word Mnemonic"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .frame(theme::dialog_frame(ctx))
             .show(ctx, |ui| {
-                ui.label("Unlocks your DEK via recovery_slot and updates password_slot without re-encrypting data.");
+                ui.label(tr(
+                    "Unlocks your DEK via recovery_slot and updates password_slot without re-encrypting data.",
+                ));
                 ui.add_space(6.0);
                 render_mnemonic_input_with_suggestions(ui, &mut state.mnemonic_input);
                 ui.add_space(6.0);
-                ui.label("New Master Password:");
+                ui.label(tr("New Master Password:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut *state.new_password)
                         .password(true)
                         .desired_width(theme::FIELD_WIDTH),
                 );
-                ui.label("Confirm New Master Password:");
+                ui.label(tr("Confirm New Master Password:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut *state.confirm_password)
                         .password(true)
@@ -1604,14 +1646,15 @@ impl VaultController {
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         *next_modal = Some(VaultModal::LockScreen(LockScreenState::default()));
                     }
-                    if theme::primary_button(ui, "Reset Password & Unlock").clicked() {
+                    if theme::primary_button(ui, tr("Reset Password & Unlock")).clicked() {
                         if state.new_password.len() < 8 {
-                            state.error = Some("New password must be at least 8 characters.".into());
+                            state.error =
+                                Some(tr("New password must be at least 8 characters.").into());
                         } else if *state.new_password != *state.confirm_password {
-                            state.error = Some("New passwords do not match.".into());
+                            state.error = Some(tr("New passwords do not match.").into());
                         } else {
                             match self.recover_and_reset_password(
                                 &state.mnemonic_input,
@@ -1621,8 +1664,10 @@ impl VaultController {
                                     *keep_open = false;
                                     actions.push(VaultUiAction::ReloadProfiles(profiles));
                                     actions.push(VaultUiAction::Notify {
-                                        text: "Master password reset successfully via 24-word mnemonic."
-                                            .into(),
+                                        text: tr(
+                                            "Master password reset successfully via 24-word mnemonic.",
+                                        )
+                                        .into(),
                                         error: false,
                                     });
                                 }
@@ -1642,7 +1687,7 @@ impl VaultController {
         next_modal: &mut Option<VaultModal>,
         actions: &mut Vec<VaultUiAction>,
     ) {
-        egui::Window::new("☁ Vault Security & Sync Settings")
+        egui::Window::new(tr("☁ Vault Security & Sync Settings"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -1651,8 +1696,10 @@ impl VaultController {
                 render_sync_form_fields(ui, &mut state.form);
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.label("Auto-lock idle timeout (secs, 0=off):");
-                    ui.add(egui::DragValue::new(&mut state.form.auto_lock_timeout_secs).range(0..=86400));
+                    ui.label(tr("Auto-lock idle timeout (secs, 0=off):"));
+                    ui.add(
+                        egui::DragValue::new(&mut state.form.auto_lock_timeout_secs).range(0..=86400),
+                    );
                 });
                 if let Some(ref res) = state.test_result {
                     match res {
@@ -1665,7 +1712,7 @@ impl VaultController {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Test Connection").clicked() && !state.testing {
+                    if ui.button(tr("Test Connection")).clicked() && !state.testing {
                         state.testing = true;
                         state.test_result = None;
                         let cfg = state.form.to_sync_config(&SyncConfig::default());
@@ -1676,26 +1723,28 @@ impl VaultController {
                     if state.testing {
                         ui.spinner();
                     }
-                    if ui.button("Rotate DEK (Re-key Vault)…").clicked() {
+                    if ui.button(tr("Rotate DEK (Re-key Vault)…")).clicked() {
                         *next_modal = Some(VaultModal::Rekey(RekeyState::default()));
                     }
-                    if theme::danger_button(ui, "Wipe & Force Re-sync…").clicked() {
+                    if theme::danger_button(ui, tr("Wipe & Force Re-sync…")).clicked() {
                         *next_modal = Some(VaultModal::ForceWipeConfirm(ForceWipeState::default()));
                     }
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Close").clicked() {
+                    if ui.button(tr("Close")).clicked() {
                         *keep_open = false;
                     }
-                    if theme::primary_button(ui, "Save & Sync Now").clicked() {
+                    if theme::primary_button(ui, tr("Save & Sync Now")).clicked() {
                         match self.save_sync_form(&state.form) {
                             Ok(()) => {
                                 *keep_open = false;
                                 self.trigger_sync_now();
                                 actions.push(VaultUiAction::Notify {
-                                    text: "Sync settings saved to local.toml & encrypted local_secrets.enc."
-                                        .into(),
+                                    text: tr(
+                                        "Sync settings saved to local.toml & encrypted local_secrets.enc.",
+                                    )
+                                    .into(),
                                     error: false,
                                 });
                             }
@@ -1744,18 +1793,18 @@ impl VaultController {
 
                 // Title header bar.
                 ui.horizontal(|ui| {
-                    ui.heading("🔑 Managed SSH Keys (Vault)");
+                    ui.heading(tr("🔑 Managed SSH Keys (Vault)"));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("×").on_hover_text("Close").clicked() {
+                        if ui.button("×").on_hover_text(tr("Close")).clicked() {
                             *keep_open = false;
                         }
                     });
                 });
                 ui.add(
                     egui::Label::new(
-                        RichText::new(
+                        RichText::new(tr(
                             "First-class SSH key assets deduplicated by SHA-256 and synced end-to-end via SM4-GCM. Deleting a profile never deletes its key.",
-                        )
+                        ))
                         .small()
                         .weak(),
                     )
@@ -1796,12 +1845,12 @@ impl VaultController {
                                                 [btn_w, 26.0],
                                                 egui::Button::selectable(
                                                     import_selected,
-                                                    "+ Import",
+                                                    tr("+ Import"),
                                                 ),
                                             )
-                                            .on_hover_text(
+                                            .on_hover_text(tr(
                                                 "Import an existing SSH key from disk or PEM",
-                                            )
+                                            ))
                                             .clicked()
                                         {
                                             state.pane = KeysPane::Import;
@@ -1815,12 +1864,12 @@ impl VaultController {
                                                 [btn_w, 26.0],
                                                 egui::Button::selectable(
                                                     gen_selected,
-                                                    "+ Generate",
+                                                    tr("+ Generate"),
                                                 ),
                                             )
-                                            .on_hover_text(
+                                            .on_hover_text(tr(
                                                 "Generate a new SSH key pair inside the vault",
-                                            )
+                                            ))
                                             .clicked()
                                         {
                                             state.pane = KeysPane::Generate;
@@ -1831,7 +1880,7 @@ impl VaultController {
                                     ui.add_space(6.0);
                                     ui.add(
                                         egui::TextEdit::singleline(&mut state.search_query)
-                                            .hint_text("Filter keys…")
+                                            .hint_text(tr("Filter keys…"))
                                             .desired_width(inner_w),
                                     );
                                     ui.add_space(6.0);
@@ -1847,16 +1896,16 @@ impl VaultController {
                                                 ui.add_space(12.0);
                                                 ui.add(
                                                     egui::Label::new(
-                                                        RichText::new("No SSH keys in vault yet.")
+                                                        RichText::new(tr("No SSH keys in vault yet."))
                                                             .weak(),
                                                     )
                                                     .wrap(),
                                                 );
                                                 ui.add(
                                                     egui::Label::new(
-                                                        RichText::new(
+                                                        RichText::new(tr(
                                                             "Use \"+ Import\" or \"+ Generate\" above.",
-                                                        )
+                                                        ))
                                                         .small()
                                                         .weak(),
                                                     )
@@ -1922,7 +1971,7 @@ impl VaultController {
                                                 }
                                             }
                                             if !any_shown {
-                                                ui.weak("No keys match your filter.");
+                                                ui.weak(tr("No keys match your filter."));
                                             }
                                         });
                                 });
@@ -2037,7 +2086,7 @@ impl VaultController {
                         },
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close").clicked() {
+                        if ui.button(tr("Close")).clicked() {
                             *keep_open = false;
                         }
                     });
@@ -2082,22 +2131,31 @@ impl VaultController {
         // Handle pending export file dialog results.
         if let Some(export_path) = picker.take(PickId::VaultKeyExportPublic) {
             if summary.public_key.is_empty() {
-                state.error = Some("No OpenSSH public key available for this entry.".into());
+                state.error = Some(tr("No OpenSSH public key available for this entry.").into());
             } else {
                 match std::fs::write(&export_path, format!("{}\n", summary.public_key)) {
                     Ok(()) => {
                         state.error = None;
-                        state.status =
-                            Some(format!("Exported public key to {}", export_path.display()));
+                        let path = export_path.display().to_string();
+                        state.status = Some(tr_fmt(
+                            "Exported public key to {path}",
+                            &[("path", &path)],
+                        ));
                     }
-                    Err(e) => state.error = Some(format!("Failed to export .pub: {e}")),
+                    Err(e) => {
+                        let err = e.to_string();
+                        state.error = Some(tr_fmt(
+                            "Failed to export .pub: {err}",
+                            &[("err", &err)],
+                        ));
+                    }
                 }
             }
         }
         if let Some(export_path) = picker.take(PickId::VaultKeyExportPrivate) {
             if state.export_private_authorized_sha.take().as_deref() != Some(sha) {
                 state.error = Some(
-                    "Vault master password verification required before exporting private key."
+                    tr("Vault master password verification required before exporting private key.")
                         .into(),
                 );
             } else if let Some(full_key) = self.load_ssh_key(sha) {
@@ -2105,15 +2163,22 @@ impl VaultController {
                 {
                     Ok(()) => {
                         state.error = None;
-                        state.status = Some(format!(
-                            "Exported private key (0600) to {}",
-                            export_path.display()
+                        let path = export_path.display().to_string();
+                        state.status = Some(tr_fmt(
+                            "Exported private key (0600) to {path}",
+                            &[("path", &path)],
                         ));
                     }
-                    Err(e) => state.error = Some(format!("Failed to export private key: {e}")),
+                    Err(e) => {
+                        let err = e.to_string();
+                        state.error = Some(tr_fmt(
+                            "Failed to export private key: {err}",
+                            &[("err", &err)],
+                        ));
+                    }
                 }
             } else {
-                state.error = Some("Could not decrypt key for export.".into());
+                state.error = Some(tr("Could not decrypt key for export.").into());
             }
         }
 
@@ -2122,7 +2187,7 @@ impl VaultController {
 
         // Label rename row.
         ui.horizontal(|ui| {
-            ui.label("Label:");
+            ui.label(tr("Label:"));
             ui.add(
                 egui::TextEdit::singleline(&mut state.detail_label)
                     .margin(theme::FIELD_MARGIN)
@@ -2131,7 +2196,7 @@ impl VaultController {
             let changed =
                 state.detail_label.trim() != summary.label && !state.detail_label.trim().is_empty();
             if ui
-                .add_enabled(changed, egui::Button::new("Rename"))
+                .add_enabled(changed, egui::Button::new(tr("Rename")))
                 .clicked()
             {
                 match self.update_managed_key_meta(
@@ -2142,7 +2207,7 @@ impl VaultController {
                 ) {
                     Ok(()) => {
                         state.error = None;
-                        state.status = Some("Key renamed.".into());
+                        state.status = Some(tr("Key renamed.").into());
                     }
                     Err(e) => state.error = Some(e),
                 }
@@ -2155,10 +2220,10 @@ impl VaultController {
             .num_columns(2)
             .spacing([12.0, 4.0])
             .show(ui, |ui| {
-                ui.weak("Fingerprint:");
+                ui.weak(tr("Fingerprint:"));
                 ui.horizontal(|ui| {
                     let fp_text = if summary.fingerprint.is_empty() {
-                        "(unavailable)"
+                        tr("(unavailable)")
                     } else {
                         summary.fingerprint.as_str()
                     };
@@ -2176,17 +2241,21 @@ impl VaultController {
                                 .on_hover_text(fp_text);
                         },
                     );
-                    if !summary.fingerprint.is_empty() && ui.small_button("Copy").clicked() {
+                    if !summary.fingerprint.is_empty() && ui.small_button(tr("Copy")).clicked() {
                         ctx.copy_text(summary.fingerprint.clone());
                         state.detail_copied_fp = true;
                     }
                     if state.detail_copied_fp {
-                        ui.label(RichText::new("Copied").small().color(theme::TERMINAL_CYAN));
+                        ui.label(
+                            RichText::new(tr("Copied"))
+                                .small()
+                                .color(theme::TERMINAL_CYAN),
+                        );
                     }
                 });
                 ui.end_row();
 
-                ui.weak("Vault SHA-256:");
+                ui.weak(tr("Vault SHA-256:"));
                 ui.add(
                     egui::Label::new(
                         RichText::new(&summary.sha256[..24.min(summary.sha256.len())]).monospace(),
@@ -2196,7 +2265,7 @@ impl VaultController {
                 .on_hover_text(&summary.sha256);
                 ui.end_row();
 
-                ui.weak("Used by:");
+                ui.weak(tr("Used by:"));
                 let used_by: Vec<String> = config
                     .profiles
                     .iter()
@@ -2206,7 +2275,10 @@ impl VaultController {
                 if used_by.is_empty() {
                     ui.add(
                         egui::Label::new(
-                            RichText::new("Independent key (not linked to any session yet)").weak(),
+                            RichText::new(tr(
+                                "Independent key (not linked to any session yet)",
+                            ))
+                            .weak(),
                         )
                         .wrap(),
                     );
@@ -2217,9 +2289,9 @@ impl VaultController {
             });
 
         ui.add_space(8.0);
-        ui.strong("Public Key (OpenSSH authorized_keys)");
+        ui.strong(tr("Public Key (OpenSSH authorized_keys)"));
         if summary.public_key.is_empty() {
-            ui.weak("Public key line unavailable (legacy PEM format).");
+            ui.weak(tr("Public key line unavailable (legacy PEM format)."));
         } else {
             let mut pub_preview = summary.public_key.clone();
             egui::ScrollArea::vertical()
@@ -2236,11 +2308,11 @@ impl VaultController {
                 });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                if theme::primary_button(ui, "📋 Copy Public Key").clicked() {
+                if theme::primary_button(ui, tr("📋 Copy Public Key")).clicked() {
                     ctx.copy_text(summary.public_key.clone());
                     state.detail_copied_pub = true;
                 }
-                if ui.button("💾 Export .pub…").clicked() {
+                if ui.button(tr("💾 Export .pub…")).clicked() {
                     let default_name = format!("{}.pub", summary.label);
                     picker.open(
                         ctx,
@@ -2251,7 +2323,7 @@ impl VaultController {
                 }
                 if state.detail_copied_pub {
                     ui.label(
-                        RichText::new("Copied to clipboard!")
+                        RichText::new(tr("Copied to clipboard!"))
                             .small()
                             .color(theme::TERMINAL_CYAN),
                     );
@@ -2261,32 +2333,32 @@ impl VaultController {
 
         ui.add_space(8.0);
         ui.separator();
-        ui.strong("Passphrase & Connection Security");
+        ui.strong(tr("Passphrase & Connection Security"));
         ui.checkbox(
             &mut state.detail_require_prompt,
-            "Prompt for passphrase on every SSH connection (high-security)",
+            tr("Prompt for passphrase on every SSH connection (high-security)"),
         );
         if !state.detail_require_prompt {
             let pw_status = if summary.has_saved_passphrase {
-                "Stored passphrase: configured (encrypted in vault)"
+                tr("Stored passphrase: configured (encrypted in vault)")
             } else {
-                "Stored passphrase: none"
+                tr("Stored passphrase: none")
             };
             ui.label(RichText::new(pw_status).small());
             egui::Grid::new("key_detail_pass_grid")
                 .num_columns(2)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    ui.label("Set/Update Passphrase:");
+                    ui.label(tr("Set/Update Passphrase:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.detail_new_passphrase)
                             .password(true)
-                            .hint_text("Leave blank to keep unchanged")
+                            .hint_text(tr("Leave blank to keep unchanged"))
                             .desired_width(200.0),
                     );
                     ui.end_row();
                     if !state.detail_new_passphrase.is_empty() {
-                        ui.label("Confirm Passphrase:");
+                        ui.label(tr("Confirm Passphrase:"));
                         ui.add(
                             egui::TextEdit::singleline(&mut *state.detail_confirm_passphrase)
                                 .password(true)
@@ -2297,12 +2369,12 @@ impl VaultController {
                 });
         }
         ui.horizontal(|ui| {
-            if ui.button("Save Security Settings").clicked() {
+            if ui.button(tr("Save Security Settings")).clicked() {
                 if !state.detail_require_prompt
                     && !state.detail_new_passphrase.is_empty()
                     && *state.detail_new_passphrase != *state.detail_confirm_passphrase
                 {
-                    state.error = Some("Passphrase confirmation does not match.".into());
+                    state.error = Some(tr("Passphrase confirmation does not match.").into());
                 } else {
                     let pass_update = if state.detail_require_prompt {
                         Some(None)
@@ -2321,7 +2393,7 @@ impl VaultController {
                             state.detail_new_passphrase.clear();
                             state.detail_confirm_passphrase.clear();
                             state.error = None;
-                            state.status = Some("Key security settings updated.".into());
+                            state.status = Some(tr("Key security settings updated.").into());
                         }
                         Err(e) => state.error = Some(e),
                     }
@@ -2329,12 +2401,12 @@ impl VaultController {
             }
             if summary.has_saved_passphrase
                 && !state.detail_require_prompt
-                && ui.button("Clear Stored Passphrase").clicked()
+                && ui.button(tr("Clear Stored Passphrase")).clicked()
             {
                 match self.update_managed_key_meta(sha, None, None, Some(None)) {
                     Ok(()) => {
                         state.error = None;
-                        state.status = Some("Stored passphrase cleared.".into());
+                        state.status = Some(tr("Stored passphrase cleared.").into());
                     }
                     Err(e) => state.error = Some(e),
                 }
@@ -2370,20 +2442,23 @@ impl VaultController {
             ui.colored_label(
                 theme::DAWN_GOLD,
                 if affected.is_empty() {
-                    format!("Permanently delete managed key \"{}\"?", summary.label)
+                    tr_fmt(
+                        "Permanently delete managed key \"{label}\"?",
+                        &[("label", &summary.label)],
+                    )
                 } else {
-                    format!(
-                        "Warning: \"{}\" is used by [{}]. Delete anyway?",
-                        summary.label,
-                        affected.join(", ")
+                    let profiles = affected.join(", ");
+                    tr_fmt(
+                        "Warning: \"{label}\" is used by [{profiles}]. Delete anyway?",
+                        &[("label", &summary.label), ("profiles", &profiles)],
                     )
                 },
             );
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     state.pending_delete_sha = None;
                 }
-                if theme::danger_button(ui, "Confirm Delete Key").clicked() {
+                if theme::danger_button(ui, tr("Confirm Delete Key")).clicked() {
                     let del_res = self
                         .store
                         .try_lock()
@@ -2400,7 +2475,10 @@ impl VaultController {
                                 .map(|k| KeysPane::Detail(k.sha256.clone()))
                                 .unwrap_or(KeysPane::Import);
                             actions.push(VaultUiAction::Notify {
-                                text: format!("Deleted managed SSH key \"{}\".", summary.label),
+                                text: tr_fmt(
+                                    "Deleted managed SSH key \"{label}\".",
+                                    &[("label", &summary.label)],
+                                ),
                                 error: false,
                             });
                         }
@@ -2411,27 +2489,27 @@ impl VaultController {
         } else if state.pending_export_private_sha.as_deref() == Some(sha) {
             ui.colored_label(
                 theme::DAWN_GOLD,
-                "Verify vault master password to export private key:",
+                tr("Verify vault master password to export private key:"),
             );
             ui.horizontal(|ui| {
                 let pw_resp = ui.add(
                     egui::TextEdit::singleline(&mut *state.export_vault_password)
                         .id_salt("vault_export_priv_pw")
                         .password(true)
-                        .hint_text("Vault master password")
+                        .hint_text(tr("Vault master password"))
                         .desired_width(220.0),
                 );
                 let enter_submit = pw_resp.lost_focus()
                     && ui.input(|i| i.key_pressed(egui::Key::Enter))
                     && !state.export_vault_password.is_empty();
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     state.pending_export_private_sha = None;
                     state.export_vault_password.clear();
                     state.error = None;
                 }
                 let can_submit = !state.export_vault_password.is_empty();
                 let clicked = ui
-                    .add_enabled(can_submit, egui::Button::new("🔒 Verify & Export…"))
+                    .add_enabled(can_submit, egui::Button::new(tr("🔒 Verify & Export…")))
                     .clicked();
                 if clicked || enter_submit {
                     let verify_res =
@@ -2457,7 +2535,7 @@ impl VaultController {
             });
         } else {
             ui.horizontal(|ui| {
-                if ui.button("💾 Export Private Key…").clicked() {
+                if ui.button(tr("💾 Export Private Key…")).clicked() {
                     state.pending_delete_sha = None;
                     state.pending_export_private_sha = Some(sha.to_owned());
                     state.export_private_authorized_sha = None;
@@ -2466,7 +2544,7 @@ impl VaultController {
                     state.status = None;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::danger_button(ui, "🗑 Delete Key").clicked() {
+                    if theme::danger_button(ui, tr("🗑 Delete Key")).clicked() {
                         state.pending_export_private_sha = None;
                         state.export_vault_password.clear();
                         state.pending_delete_sha = Some(sha.to_owned());
@@ -2482,26 +2560,31 @@ impl VaultController {
         state: &mut KeysManagerState,
         picker: &mut Picker,
     ) {
-        ui.heading("Import SSH Key into Vault");
+        ui.heading(tr("Import SSH Key into Vault"));
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut state.import_tab, ImportSourceTab::File, "📁 From File");
+            ui.selectable_value(
+                &mut state.import_tab,
+                ImportSourceTab::File,
+                tr("📁 From File"),
+            );
+            let count = state.discovered_keys.len().to_string();
             ui.selectable_value(
                 &mut state.import_tab,
                 ImportSourceTab::DiscoverSshDir,
-                format!("🔍 Discover ~/.ssh ({})", state.discovered_keys.len()),
+                tr_fmt("🔍 Discover ~/.ssh ({count})", &[("count", &count)]),
             );
             ui.selectable_value(
                 &mut state.import_tab,
                 ImportSourceTab::PastePem,
-                "📋 Paste PEM",
+                tr("📋 Paste PEM"),
             );
         });
         ui.add_space(6.0);
 
         match state.import_tab {
             ImportSourceTab::File => {
-                ui.label("Key file:");
+                ui.label(tr("Key file:"));
                 let row_w = ui.available_width();
                 ui.allocate_ui_with_layout(
                     egui::vec2(row_w, ui.spacing().interact_size.y),
@@ -2516,7 +2599,7 @@ impl VaultController {
                         ui.add(
                             egui::TextEdit::singleline(&mut state.import_path)
                                 .margin(theme::FIELD_MARGIN)
-                                .hint_text("~/.ssh/id_ed25519 or click Browse…")
+                                .hint_text(tr("~/.ssh/id_ed25519 or click Browse…"))
                                 .desired_width(f32::INFINITY),
                         );
                         if let Some(path) = picked {
@@ -2541,26 +2624,29 @@ impl VaultController {
                             Ok(text) => {
                                 rooste_keys::inspect_key_text(&text).map_err(|e| e.to_string())
                             }
-                            Err(e) => Err(format!("Cannot read file: {e}")),
+                            Err(e) => {
+                                let err = e.to_string();
+                                Err(tr_fmt("Cannot read file: {err}", &[("err", &err)]))
+                            }
                         });
                     }
                 }
             }
             ImportSourceTab::DiscoverSshDir => {
                 ui.horizontal(|ui| {
-                    ui.weak("Local private keys found in ~/.ssh:");
-                    if ui.small_button("⟳ Rescan").clicked() {
+                    ui.weak(tr("Local private keys found in ~/.ssh:"));
+                    if ui.small_button(tr("⟳ Rescan")).clicked() {
                         state.discovered_keys = scan_local_ssh_dir();
                     }
                 });
                 ui.add_space(4.0);
                 if state.discovered_keys.is_empty() {
-                    ui.weak(
+                    ui.weak(tr(
                         "No private keys detected in ~/.ssh. Use \"From File\" → Browse… instead.",
-                    );
+                    ));
                 } else {
                     egui::ScrollArea::vertical()
-                        .id_salt("discovered_ssh_keys_scroll")
+                        .id_salt("vault_keys_scroll")
                         .max_height(130.0)
                         .show(ui, |ui| {
                             for item in state.discovered_keys.clone() {
@@ -2572,18 +2658,18 @@ impl VaultController {
                                     ui.strong(&item.file_name);
                                     ui.weak(&item.algorithm);
                                     if item.is_encrypted {
-                                        ui.colored_label(theme::DAWN_GOLD, "🔒 encrypted");
+                                        ui.colored_label(theme::DAWN_GOLD, tr("🔒 encrypted"));
                                     }
                                     if already {
                                         ui.colored_label(
                                             Color32::from_rgb(80, 200, 120),
-                                            "✓ In Vault",
+                                            tr("✓ In Vault"),
                                         );
                                     }
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            if ui.button("Select").clicked() {
+                                            if ui.button(tr("Select")).clicked() {
                                                 state.import_path = item.path.display().to_string();
                                                 state.import_label = item.file_name.clone();
                                                 state.import_inspected_source.clear();
@@ -2598,7 +2684,7 @@ impl VaultController {
                 }
             }
             ImportSourceTab::PastePem => {
-                ui.label("Paste OpenSSH private key PEM or PuTTY .ppk text:");
+                ui.label(tr("Paste OpenSSH private key PEM or PuTTY .ppk text:"));
                 ui.add(
                     egui::TextEdit::multiline(&mut *state.import_pem)
                         .font(egui::TextStyle::Monospace)
@@ -2624,18 +2710,18 @@ impl VaultController {
         let source_is_encrypted = match &state.import_inspection {
             Some(Ok(info)) => {
                 let kind_note = if info.is_ppk {
-                    " (will convert .ppk → OpenSSH PEM)"
+                    tr(" (will convert .ppk → OpenSSH PEM)")
                 } else if info.needs_normalization {
-                    " (will normalize PEM → OpenSSH)"
+                    tr(" (will normalize PEM → OpenSSH)")
                 } else {
                     ""
                 };
                 if info.is_encrypted {
                     ui.add(
                         egui::Label::new(
-                            RichText::new(format!(
-                                "🔒 Encrypted {} key detected{kind_note} — enter its passphrase to verify & import.",
-                                info.algorithm
+                            RichText::new(tr_fmt(
+                                "🔒 Encrypted {alg} key detected{note} — enter its passphrase to verify & import.",
+                                &[("alg", &info.algorithm), ("note", kind_note)],
                             ))
                             .color(theme::DAWN_GOLD),
                         )
@@ -2644,9 +2730,13 @@ impl VaultController {
                 } else {
                     ui.add(
                         egui::Label::new(
-                            RichText::new(format!(
-                                "✔ Valid {} key{kind_note}\n{}",
-                                info.algorithm, info.fingerprint
+                            RichText::new(tr_fmt(
+                                "✔ Valid {alg} key{note}\n{fp}",
+                                &[
+                                    ("alg", &info.algorithm),
+                                    ("note", kind_note),
+                                    ("fp", &info.fingerprint),
+                                ],
                             ))
                             .color(Color32::from_rgb(80, 200, 120)),
                         )
@@ -2672,7 +2762,7 @@ impl VaultController {
             .num_columns(2)
             .spacing(theme::FORM_SPACING)
             .show(ui, |ui| {
-                ui.label("Label:");
+                ui.label(tr("Label:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut state.import_label)
                         .hint_text("e.g. prod-ed25519")
@@ -2681,9 +2771,9 @@ impl VaultController {
                 ui.end_row();
 
                 let pass_label = if source_is_encrypted {
-                    "Key Passphrase:"
+                    tr("Key Passphrase:")
                 } else {
-                    "Protect w/ Passphrase (optional):"
+                    tr("Protect w/ Passphrase (optional):")
                 };
                 ui.label(pass_label);
                 ui.add(
@@ -2694,7 +2784,7 @@ impl VaultController {
                 ui.end_row();
 
                 if !state.import_passphrase.is_empty() {
-                    ui.label("Confirm Passphrase:");
+                    ui.label(tr("Confirm Passphrase:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.import_confirm_passphrase)
                             .password(true)
@@ -2706,20 +2796,18 @@ impl VaultController {
 
         ui.checkbox(
             &mut state.import_require_prompt,
-            "Prompt for passphrase on every SSH connection (do not store passphrase in vault)",
+            tr("Prompt for passphrase on every SSH connection (do not store passphrase in vault)"),
         );
         ui.add_space(8.0);
-        if theme::primary_button(ui, "Import & Deduplicate into Vault").clicked() {
+        if theme::primary_button(ui, tr("Import & Deduplicate into Vault")).clicked() {
             match self.handle_import_key(state) {
                 Ok((sha, dedup)) => {
                     state.error = None;
+                    let prefix = &sha[..12.min(sha.len())];
                     state.status = Some(if dedup {
-                        format!(
-                            "Reused existing vault key ({}…).",
-                            &sha[..12.min(sha.len())]
-                        )
+                        tr_fmt("Reused existing vault key ({sha}…).", &[("sha", prefix)])
                     } else {
-                        format!("Imported new vault key ({}…).", &sha[..12.min(sha.len())])
+                        tr_fmt("Imported new vault key ({sha}…).", &[("sha", prefix)])
                     });
                     state.import_pem.clear();
                     state.import_path.clear();
@@ -2742,11 +2830,11 @@ impl VaultController {
         state: &mut KeysManagerState,
         actions: &mut Vec<VaultUiAction>,
     ) {
-        ui.heading("Generate New SSH Key in Vault");
+        ui.heading(tr("Generate New SSH Key in Vault"));
         ui.label(
-            RichText::new(
+            RichText::new(tr(
                 "Generates a fresh key pair directly inside the SM4-GCM vault (never touches unencrypted disk).",
-            )
+            ))
             .small(),
         );
         ui.add_space(8.0);
@@ -2755,7 +2843,7 @@ impl VaultController {
             .num_columns(2)
             .spacing(theme::FORM_SPACING)
             .show(ui, |ui| {
-                ui.label("Label:");
+                ui.label(tr("Label:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut state.gen_label)
                         .hint_text("e.g. prod-ed25519")
@@ -2763,7 +2851,7 @@ impl VaultController {
                 );
                 ui.end_row();
 
-                ui.label("Key Type:");
+                ui.label(tr("Key Type:"));
                 egui::ComboBox::from_id_salt("vault_key_gen_type")
                     .selected_text(state.gen_type.label())
                     .show_ui(ui, |ui| {
@@ -2773,7 +2861,7 @@ impl VaultController {
                     });
                 ui.end_row();
 
-                ui.label("Comment:");
+                ui.label(tr("Comment:"));
                 ui.add(
                     egui::TextEdit::singleline(&mut state.gen_comment)
                         .hint_text("user@host")
@@ -2781,7 +2869,7 @@ impl VaultController {
                 );
                 ui.end_row();
 
-                ui.label("Passphrase (optional):");
+                ui.label(tr("Passphrase (optional):"));
                 ui.add(
                     egui::TextEdit::singleline(&mut *state.gen_passphrase)
                         .password(true)
@@ -2790,7 +2878,7 @@ impl VaultController {
                 ui.end_row();
 
                 if !state.gen_passphrase.is_empty() {
-                    ui.label("Confirm Passphrase:");
+                    ui.label(tr("Confirm Passphrase:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.gen_confirm_passphrase)
                             .password(true)
@@ -2802,15 +2890,15 @@ impl VaultController {
 
         ui.checkbox(
             &mut state.gen_require_prompt,
-            "Prompt for passphrase on every SSH connection (high-security)",
+            tr("Prompt for passphrase on every SSH connection (high-security)"),
         );
         ui.add_space(8.0);
-        if theme::primary_button(ui, "✨ Generate & Save to Vault").clicked() {
+        if theme::primary_button(ui, tr("✨ Generate & Save to Vault")).clicked() {
             match self.handle_generate_key(state) {
                 Ok(sha) => {
                     state.error = None;
                     state.status = Some(
-                        "New SSH key generated & saved to vault! Copy its public key on the right."
+                        tr("New SSH key generated & saved to vault! Copy its public key on the right.")
                             .into(),
                     );
                     state.gen_passphrase.clear();
@@ -2818,7 +2906,7 @@ impl VaultController {
                     self.refresh_managed_keys();
                     state.select_detail(sha);
                     actions.push(VaultUiAction::Notify {
-                        text: "Generated new managed SSH key in encrypted vault.".into(),
+                        text: tr("Generated new managed SSH key in encrypted vault.").into(),
                         error: false,
                     });
                 }
@@ -2834,7 +2922,7 @@ impl VaultController {
         keep_open: &mut bool,
         actions: &mut Vec<VaultUiAction>,
     ) {
-        egui::Window::new("🔄 Rotate Vault DEK & Mnemonic (Re-key)")
+        egui::Window::new(tr("🔄 Rotate Vault DEK & Mnemonic (Re-key)"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -2843,7 +2931,7 @@ impl VaultController {
                 if let Some(ref mnemonic) = state.new_mnemonic {
                     ui.colored_label(
                         theme::DAWN_GOLD,
-                        "Vault re-encrypted with a brand-new DEK! Write down your NEW 24-word mnemonic now:",
+                        tr("Vault re-encrypted with a brand-new DEK! Write down your NEW 24-word mnemonic now:"),
                     );
                     let words: Vec<&str> = mnemonic.split_whitespace().collect();
                     egui::Grid::new("rekey_mnemonic_grid")
@@ -2863,26 +2951,26 @@ impl VaultController {
                             }
                         });
                     ui.add_space(6.0);
-                    if ui.button("Copy New Mnemonic (30s auto-clear)").clicked() {
+                    if ui.button(tr("Copy New Mnemonic (30s auto-clear)")).clicked() {
                         ctx.copy_text(mnemonic.as_str().to_owned());
                         self.clipboard_clear_at = Some(Instant::now() + Duration::from_secs(30));
                     }
                     ui.add_space(6.0);
-                    if theme::primary_button(ui, "Done & Sync Rotated Vault").clicked() {
+                    if theme::primary_button(ui, tr("Done & Sync Rotated Vault")).clicked() {
                         *keep_open = false;
                         self.trigger_sync_now();
                     }
                 } else {
-                    ui.label(
+                    ui.label(tr(
                         "Generates a brand-new SM4 DEK & 24-word mnemonic, re-encrypting every record and invalidating old keys.",
-                    );
-                    ui.label("New Master Password:");
+                    ));
+                    ui.label(tr("New Master Password:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.new_password)
                             .password(true)
                             .desired_width(theme::FIELD_WIDTH),
                     );
-                    ui.label("Confirm New Master Password:");
+                    ui.label(tr("Confirm New Master Password:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *state.confirm_password)
                             .password(true)
@@ -2892,22 +2980,25 @@ impl VaultController {
                         ui.colored_label(ui.visuals().error_fg_color, err);
                     }
                     ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             *keep_open = false;
                         }
-                        if theme::danger_button(ui, "Rotate Keys Now").clicked() {
+                        if theme::danger_button(ui, tr("Rotate Keys Now")).clicked() {
                             if state.new_password.len() < 8 {
-                                state.error = Some("Password must be at least 8 characters.".into());
+                                state.error =
+                                    Some(tr("Password must be at least 8 characters.").into());
                             } else if *state.new_password != *state.confirm_password {
-                                state.error = Some("Passwords do not match.".into());
+                                state.error = Some(tr("Passwords do not match.").into());
                             } else if let Ok(mut guard) = self.store.try_lock() {
                                 match guard.rekey(&state.new_password) {
                                     Ok(init) => {
                                         state.new_mnemonic = Some(init.mnemonic);
                                         state.error = None;
                                         actions.push(VaultUiAction::Notify {
-                                            text: "Vault DEK rotated and all records re-encrypted."
-                                                .into(),
+                                            text: tr(
+                                                "Vault DEK rotated and all records re-encrypted.",
+                                            )
+                                            .into(),
                                             error: false,
                                         });
                                     }
@@ -3159,22 +3250,25 @@ impl VaultController {
         if !state.import_passphrase.is_empty()
             && *state.import_passphrase != *state.import_confirm_passphrase
         {
-            return Err("Passphrase confirmation does not match.".into());
+            return Err(tr("Passphrase confirmation does not match.").into());
         }
         let raw_text = match state.import_tab {
             ImportSourceTab::PastePem => {
                 if state.import_pem.trim().is_empty() {
-                    return Err("Paste an OpenSSH PEM or PuTTY .ppk private key.".into());
+                    return Err(tr("Paste an OpenSSH PEM or PuTTY .ppk private key.").into());
                 }
                 state.import_pem.as_str().to_owned()
             }
             ImportSourceTab::File | ImportSourceTab::DiscoverSshDir => {
                 if state.import_path.trim().is_empty() {
-                    return Err("Click Browse… (or pick a key from ~/.ssh) first.".into());
+                    return Err(tr("Click Browse… (or pick a key from ~/.ssh) first.").into());
                 }
                 let expanded = rooste_core::expand_tilde(state.import_path.trim());
-                std::fs::read_to_string(&expanded)
-                    .map_err(|e| format!("Failed to read {}: {e}", expanded.display()))?
+                std::fs::read_to_string(&expanded).map_err(|e| {
+                    let path = expanded.display().to_string();
+                    let err = e.to_string();
+                    tr_fmt("Failed to read {path}: {err}", &[("path", &path), ("err", &err)])
+                })?
             }
         };
 
@@ -3387,17 +3481,26 @@ fn default_key_comment() -> String {
     format!("{user}@{host}")
 }
 
+fn sync_backend_label(kind: SyncBackendKind) -> &'static str {
+    match kind {
+        SyncBackendKind::None => tr("Disabled"),
+        SyncBackendKind::GitHub => tr("GitHub (Private Repo)"),
+        SyncBackendKind::S3 => tr("S3 Compatible"),
+        SyncBackendKind::WebDav => "WebDAV",
+    }
+}
+
 fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
     egui::Grid::new("vault_sync_form_grid")
         .num_columns(2)
         .spacing(theme::FORM_SPACING)
         .show(ui, |ui| {
-            ui.label("Backend:");
+            ui.label(tr("Backend:"));
             egui::ComboBox::from_id_salt("sync_backend_combo")
-                .selected_text(form.backend.label())
+                .selected_text(sync_backend_label(form.backend))
                 .show_ui(ui, |ui| {
                     for kind in SyncBackendKind::ALL {
-                        ui.selectable_value(&mut form.backend, kind, kind.label());
+                        ui.selectable_value(&mut form.backend, kind, sync_backend_label(kind));
                     }
                 });
             ui.end_row();
@@ -3405,17 +3508,17 @@ fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
             match form.backend {
                 SyncBackendKind::None => {}
                 SyncBackendKind::GitHub => {
-                    ui.label("Repository (owner/repo or URL):");
+                    ui.label(tr("Repository (owner/repo or URL):"));
                     ui.add(
                         egui::TextEdit::singleline(&mut form.endpoint)
                             .hint_text("alexleft/rooste-vault-private")
                             .desired_width(theme::FIELD_WIDTH),
                     );
                     ui.end_row();
-                    ui.label("Branch:");
+                    ui.label(tr("Branch:"));
                     ui.text_edit_singleline(&mut form.branch);
                     ui.end_row();
-                    ui.label("GitHub PAT:");
+                    ui.label(tr("GitHub PAT:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *form.github_pat)
                             .password(true)
@@ -3425,26 +3528,26 @@ fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
                     ui.end_row();
                 }
                 SyncBackendKind::S3 => {
-                    ui.label("S3 Endpoint URL:");
+                    ui.label(tr("S3 Endpoint URL:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut form.endpoint)
                             .hint_text("https://<account>.r2.cloudflarestorage.com")
                             .desired_width(theme::FIELD_WIDTH),
                     );
                     ui.end_row();
-                    ui.label("Bucket:");
+                    ui.label(tr("Bucket:"));
                     ui.text_edit_singleline(&mut form.s3_bucket);
                     ui.end_row();
-                    ui.label("Region:");
+                    ui.label(tr("Region:"));
                     ui.text_edit_singleline(&mut form.s3_region);
                     ui.end_row();
-                    ui.label("Access Key ID:");
+                    ui.label(tr("Access Key ID:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *form.s3_access_key)
                             .desired_width(theme::FIELD_WIDTH),
                     );
                     ui.end_row();
-                    ui.label("Secret Access Key:");
+                    ui.label(tr("Secret Access Key:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *form.s3_secret_key)
                             .password(true)
@@ -3453,20 +3556,20 @@ fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
                     ui.end_row();
                 }
                 SyncBackendKind::WebDav => {
-                    ui.label("WebDAV Root URL:");
+                    ui.label(tr("WebDAV Root URL:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut form.endpoint)
                             .hint_text("https://nas.local/remote.php/dav/files/user/rooste")
                             .desired_width(theme::FIELD_WIDTH),
                     );
                     ui.end_row();
-                    ui.label("Username:");
+                    ui.label(tr("Username:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *form.webdav_user)
                             .desired_width(theme::FIELD_WIDTH),
                     );
                     ui.end_row();
-                    ui.label("Password:");
+                    ui.label(tr("Password:"));
                     ui.add(
                         egui::TextEdit::singleline(&mut *form.webdav_password)
                             .password(true)
@@ -3477,11 +3580,11 @@ fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
             }
 
             if form.backend != SyncBackendKind::None {
-                ui.label("Optional Sub-prefix:");
+                ui.label(tr("Optional Sub-prefix:"));
                 ui.text_edit_singleline(&mut form.prefix);
                 ui.end_row();
 
-                ui.label("Auto-sync interval (secs):");
+                ui.label(tr("Auto-sync interval (secs):"));
                 ui.add(egui::DragValue::new(&mut form.auto_sync_interval_secs).range(0..=86400));
                 ui.end_row();
             }
@@ -3489,14 +3592,17 @@ fn render_sync_form_fields(ui: &mut Ui, form: &mut SyncFormState) {
 }
 
 fn render_mnemonic_input_with_suggestions(ui: &mut Ui, input: &mut Zeroizing<String>) {
-    let count = input.split_whitespace().count();
-    ui.label(format!(
-        "24-Word BIP-39 Recovery Mnemonic ({count}/24 words):"
+    let count = input.split_whitespace().count().to_string();
+    ui.label(tr_fmt(
+        "24-Word BIP-39 Recovery Mnemonic ({count}/24 words):",
+        &[("count", &count)],
     ));
     ui.add(
         egui::TextEdit::multiline(&mut **input)
             .desired_rows(3)
-            .hint_text("Paste or type all 24 space-separated English BIP-39 words…")
+            .hint_text(tr(
+                "Paste or type all 24 space-separated English BIP-39 words…",
+            ))
             .desired_width(theme::FIELD_WIDTH),
     );
     // Live BIP-39 autocomplete suggestions for the word currently being typed.
@@ -3507,7 +3613,7 @@ fn render_mnemonic_input_with_suggestions(ui: &mut Ui, input: &mut Zeroizing<Str
         let suggestions = suggest_mnemonic_words(&last);
         if !suggestions.is_empty() {
             ui.horizontal_wrapped(|ui| {
-                ui.weak("Suggestions:");
+                ui.weak(tr("Suggestions:"));
                 for word in suggestions {
                     if ui.small_button(word).clicked()
                         && let Some(pos) = input.rfind(&last)
@@ -3562,17 +3668,28 @@ fn disable_ime_for_password_field(ui: &egui::Ui, edit: &egui::Response, needs_fo
 }
 
 fn format_sync_report(report: &SyncReport) -> String {
+    let seq = report.manifest_sequence.to_string();
     if report.up_to_date {
-        format!("Up to date (seq {})", report.manifest_sequence)
+        tr_fmt("Up to date (seq {seq})", &[("seq", &seq)])
     } else if report.deleted_local > 0 {
-        format!(
-            "Synced: ↓{} ↑{} 🗑{} (seq {})",
-            report.pulled, report.pushed, report.deleted_local, report.manifest_sequence
+        let pulled = report.pulled.to_string();
+        let pushed = report.pushed.to_string();
+        let deleted = report.deleted_local.to_string();
+        tr_fmt(
+            "Synced: ↓{pulled} ↑{pushed} 🗑{deleted} (seq {seq})",
+            &[
+                ("pulled", &pulled),
+                ("pushed", &pushed),
+                ("deleted", &deleted),
+                ("seq", &seq),
+            ],
         )
     } else {
-        format!(
-            "Synced: ↓{} ↑{} (seq {})",
-            report.pulled, report.pushed, report.manifest_sequence
+        let pulled = report.pulled.to_string();
+        let pushed = report.pushed.to_string();
+        tr_fmt(
+            "Synced: ↓{pulled} ↑{pushed} (seq {seq})",
+            &[("pulled", &pulled), ("pushed", &pushed), ("seq", &seq)],
         )
     }
 }

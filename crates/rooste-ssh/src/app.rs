@@ -15,6 +15,7 @@ use rooste_tmux::{
 };
 
 use crate::dialogs::{self, Decision, ProfileEditor, SettingsEditor};
+use crate::i18n::{tr, tr_fmt};
 use crate::manager::{self, ManagerAction, ManagerState};
 use crate::palette::{self as command_palette, Command};
 use crate::picker::{PickId, PickKind, Picker, path_row};
@@ -58,7 +59,7 @@ impl ConnectForm {
     pub fn request(&self) -> Result<ConnectRequest, String> {
         let host = self.host.trim();
         if host.is_empty() {
-            return Err("Enter a host name.".into());
+            return Err(tr("Enter a host name.").into());
         }
         let port = self
             .port
@@ -66,10 +67,10 @@ impl ConnectForm {
             .parse::<u16>()
             .ok()
             .filter(|&p| p != 0)
-            .ok_or("Port must be a number between 1 and 65535.")?;
+            .ok_or_else(|| tr("Port must be a number between 1 and 65535."))?;
         let user = self.user.trim();
         if user.is_empty() {
-            return Err("Enter a user name.".into());
+            return Err(tr("Enter a user name.").into());
         }
         let non_empty = |s: &str| (!s.is_empty()).then(|| s.to_owned());
         Ok(ConnectRequest {
@@ -331,7 +332,7 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
                     .on_hover_cursor(egui::CursorIcon::Default);
 
                 close_btn_response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Close")
+                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("Close"))
                 });
 
                 let visuals = ui.style().interact(&close_btn_response);
@@ -405,7 +406,7 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
             }
             let plus_response = plus_response
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("New tmux window");
+                .on_hover_text(tr("New tmux window"));
             if plus_response.clicked() {
                 self.menu_actions
                     .push((tile_id, TabMenuAction::TmuxNewWindow));
@@ -474,53 +475,61 @@ impl egui_tiles::Behavior<SessionTab> for TabBehavior {
                     ui.close();
                 }
             };
-            item(ui, "Duplicate tab", TabMenuAction::Duplicate);
-            item(ui, "Split right", TabMenuAction::SplitRight);
-            item(ui, "Split down", TabMenuAction::SplitDown);
-            item(ui, "Files (SFTP)", TabMenuAction::Files);
+            item(ui, tr("Duplicate tab"), TabMenuAction::Duplicate);
+            item(ui, tr("Split right"), TabMenuAction::SplitRight);
+            item(ui, tr("Split down"), TabMenuAction::SplitDown);
+            item(ui, tr("Files (SFTP)"), TabMenuAction::Files);
             let log_label = if logging {
-                "Stop logging"
+                tr("Stop logging")
             } else {
-                "Start logging…"
+                tr("Start logging…")
             };
             item(ui, log_label, TabMenuAction::Log);
             let record_label = if recording {
-                "Stop recording"
+                tr("Stop recording")
             } else {
-                "Record session…"
+                tr("Record session…")
             };
             item(ui, record_label, TabMenuAction::Record);
             if running_script {
-                item(ui, "Stop script", TabMenuAction::StopScript);
+                item(ui, tr("Stop script"), TabMenuAction::StopScript);
             } else {
-                ui.menu_button("Run script", |ui| {
+                ui.menu_button(tr("Run script"), |ui| {
                     let scripts = scripts_dir
                         .as_deref()
                         .map(crate::scripting::list_scripts)
                         .unwrap_or_default();
                     if scripts.is_empty() {
-                        ui.weak("No scripts yet");
+                        ui.weak(tr("No scripts yet"));
                     }
                     for name in scripts {
                         item(ui, &name, TabMenuAction::RunScript(name.clone()));
                     }
                     ui.separator();
-                    item(ui, "Open scripts folder", TabMenuAction::OpenScriptsFolder);
+                    item(
+                        ui,
+                        tr("Open scripts folder"),
+                        TabMenuAction::OpenScriptsFolder,
+                    );
                 });
             }
             if is_tmux_pane {
                 ui.separator();
-                item(ui, "tmux: Synchronize panes", TabMenuAction::TmuxSyncPanes);
+                item(
+                    ui,
+                    tr("tmux: Synchronize panes"),
+                    TabMenuAction::TmuxSyncPanes,
+                );
             }
             if is_tmux {
-                item(ui, "tmux: New window", TabMenuAction::TmuxNewWindow);
-                item(ui, "tmux: Detach session", TabMenuAction::TmuxDetach);
+                item(ui, tr("tmux: New window"), TabMenuAction::TmuxNewWindow);
+                item(ui, tr("tmux: Detach session"), TabMenuAction::TmuxDetach);
             }
             if ended {
-                item(ui, "Reconnect", TabMenuAction::Reconnect);
+                item(ui, tr("Reconnect"), TabMenuAction::Reconnect);
             }
             ui.separator();
-            item(ui, "Close tab", TabMenuAction::Close);
+            item(ui, tr("Close tab"), TabMenuAction::Close);
         });
         response
     }
@@ -626,6 +635,7 @@ impl RoosteApp {
         config_path: Option<PathBuf>,
         secrets: Arc<dyn SecretStore>,
     ) -> Self {
+        crate::i18n::set_language(config.settings.language);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("rooste-net")
@@ -749,13 +759,19 @@ impl RoosteApp {
                 }
             }
             Ok(None) if manual => self.notify(
-                format!(
-                    "You have the latest version of Rooste SSH ({}).",
-                    env!("CARGO_PKG_VERSION")
+                tr_fmt(
+                    "You have the latest version of Rooste SSH ({version}).",
+                    &[("version", env!("CARGO_PKG_VERSION"))],
                 ),
                 false,
             ),
-            Err(e) if manual => self.notify(format!("Could not check for updates: {e}"), true),
+            Err(e) if manual => {
+                let err = e.to_string();
+                self.notify(
+                    tr_fmt("Could not check for updates: {err}", &[("err", &err)]),
+                    true,
+                );
+            }
             _ => {}
         }
     }
@@ -775,22 +791,24 @@ impl RoosteApp {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "Rooste SSH {} is available (you have {}).",
-                            release.version,
-                            env!("CARGO_PKG_VERSION")
+                        RichText::new(tr_fmt(
+                            "Rooste SSH {new_version} is available (you have {current_version}).",
+                            &[
+                                ("new_version", &release.version),
+                                ("current_version", env!("CARGO_PKG_VERSION")),
+                            ],
                         ))
                         .strong(),
                     );
-                    if ui.button("Release notes").clicked() {
+                    if ui.button(tr("Release notes")).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(&release.url));
                     }
-                    if ui.button("Download").clicked() {
+                    if ui.button(tr("Download")).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(&release.download));
                     }
                     if ui
-                        .button("Skip this version")
-                        .on_hover_text("Don't tell me about this version again")
+                        .button(tr("Skip this version"))
+                        .on_hover_text(tr("Don't tell me about this version again"))
                         .clicked()
                     {
                         self.config.settings.skipped_version = release.version.clone();
@@ -800,7 +818,7 @@ impl RoosteApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .small_button("×")
-                            .on_hover_text("Hide until next start")
+                            .on_hover_text(tr("Hide until next start"))
                             .clicked()
                         {
                             self.update_banner = None;
@@ -1613,8 +1631,12 @@ impl RoosteApp {
                     sender.send(SessionCommand::TmuxAction(
                         TmuxClientAction::ToggleSyncPanes { window: window_id },
                     ));
+                    let wid = window_id.to_string();
                     self.notify(
-                        format!("Toggled synchronize-panes on tmux window {window_id}."),
+                        tr_fmt(
+                            "Toggled synchronize-panes on tmux window {id}.",
+                            &[("id", &wid)],
+                        ),
                         false,
                     );
                 }
@@ -1680,11 +1702,19 @@ impl RoosteApp {
     /// example script) the first time.
     fn open_scripts_folder(&mut self) {
         let Some(dir) = self.scripts_dir() else {
-            self.notify("Scripts need a configuration folder.", true);
+            self.notify(tr("Scripts need a configuration folder."), true);
             return;
         };
         if let Err(e) = crate::scripting::ensure_scripts_dir(&dir) {
-            self.notify(format!("Could not create {}: {e}", dir.display()), true);
+            let dir_str = dir.display().to_string();
+            let err = e.to_string();
+            self.notify(
+                tr_fmt(
+                    "Could not create {dir}: {err}",
+                    &[("dir", &dir_str), ("err", &err)],
+                ),
+                true,
+            );
             return;
         }
         let path = dir.display().to_string().replace('\\', "/");
@@ -1696,7 +1726,11 @@ impl RoosteApp {
         if let Some(ctx) = &self.ctx {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
-        self.notify(format!("Scripts are in {}", dir.display()), false);
+        let dir_str = dir.display().to_string();
+        self.notify(
+            tr_fmt("Scripts are in {dir}", &[("dir", &dir_str)]),
+            false,
+        );
     }
 
     fn toggle_broadcast(&mut self) {
@@ -1706,12 +1740,16 @@ impl RoosteApp {
             .filter(|t| t.state == TabState::Connected)
             .count();
         if self.broadcast {
+            let count_str = count.to_string();
             self.notify(
-                format!("Broadcasting input to {count} connected tabs."),
+                tr_fmt(
+                    "Broadcasting input to {count} connected tabs.",
+                    &[("count", &count_str)],
+                ),
                 false,
             );
         } else {
-            self.notify("Stopped broadcasting input.", false);
+            self.notify(tr("Stopped broadcasting input."), false);
         }
     }
 
@@ -1871,20 +1909,40 @@ impl RoosteApp {
                 }
                 self.save_config();
                 let skipped = found - added;
+                let added_str = added.to_string();
+                let skipped_str = skipped.to_string();
                 let text = match (added, skipped) {
-                    (0, 0) => format!("No sessions found in {source}."),
-                    (added, 0) => format!("Imported {added} sessions from {source}."),
-                    (added, skipped) => format!(
-                        "Imported {added} sessions from {source} ({skipped} already existed)."
+                    (0, 0) => tr_fmt("No sessions found in {source}.", &[("source", source)]),
+                    (_, 0) => tr_fmt(
+                        "Imported {added} sessions from {source}.",
+                        &[("added", &added_str), ("source", source)],
+                    ),
+                    (_, _) => tr_fmt(
+                        "Imported {added} sessions from {source} ({skipped} already existed).",
+                        &[
+                            ("added", &added_str),
+                            ("source", source),
+                            ("skipped", &skipped_str),
+                        ],
                     ),
                 };
                 self.notify(text, false);
             }
-            Err(e) => self.notify(format!("Could not import from {source}: {e}"), true),
+            Err(e) => {
+                let err = e.to_string();
+                self.notify(
+                    tr_fmt(
+                        "Could not import from {source}: {err}",
+                        &[("source", source), ("err", &err)],
+                    ),
+                    true,
+                );
+            }
         }
     }
 
     fn apply_settings(&mut self, settings: Settings) {
+        crate::i18n::set_language(settings.language);
         self.config.settings = settings;
         self.save_config();
         let settings = self.config.settings.clone();
@@ -2175,15 +2233,15 @@ impl RoosteApp {
                     self.config.profiles = profiles;
                     if warnings.is_empty() {
                         self.notify(
-                            "Migrated profiles to SM4-GCM encrypted vault (legacy config backed up).",
+                            tr("Migrated profiles to SM4-GCM encrypted vault (legacy config backed up)."),
                             false,
                         );
                     } else {
+                        let count = warnings.len().to_string();
                         self.notify(
-                            format!(
-                                "Vault migrated with {} warning(s): {}",
-                                warnings.len(),
-                                warnings[0]
+                            tr_fmt(
+                                "Vault migrated with {count} warning(s): {warning}",
+                                &[("count", &count), ("warning", &warnings[0])],
                             ),
                             true,
                         );
@@ -2225,7 +2283,7 @@ impl RoosteApp {
                 let has_tab = self.active_tab_id().is_some();
 
                 // 1. Session
-                ui.menu_button("Session", |ui| {
+                ui.menu_button(tr("Session"), |ui| {
                     let new_hint = if cfg!(target_os = "macos") {
                         "Cmd+N"
                     } else {
@@ -2237,32 +2295,32 @@ impl RoosteApp {
                         "Ctrl+Shift+T"
                     };
                     if ui
-                        .add(egui::Button::new("New session…").shortcut_text(new_hint))
+                        .add(egui::Button::new(tr("New session…")).shortcut_text(new_hint))
                         .clicked()
                     {
                         self.handle_manager(&ctx, ManagerAction::New);
                         ui.close();
                     }
                     if ui
-                        .add(egui::Button::new("Quick connect…").shortcut_text(quick_hint))
+                        .add(egui::Button::new(tr("Quick connect…")).shortcut_text(quick_hint))
                         .clicked()
                     {
                         self.dialog = Some(Dialog::QuickConnect);
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Import from PuTTY").clicked() {
+                    if ui.button(tr("Import from PuTTY")).clicked() {
                         self.import(true);
                         ui.close();
                     }
-                    if ui.button("Import from ~/.ssh/config").clicked() {
+                    if ui.button(tr("Import from ~/.ssh/config")).clicked() {
                         self.import(false);
                         ui.close();
                     }
                 });
 
                 // 2. Edit
-                ui.menu_button("Edit", |ui| {
+                ui.menu_button(tr("Edit"), |ui| {
                     let has_sel = self
                         .active_tab_id()
                         .and_then(|id| self.tab(id))
@@ -2297,7 +2355,10 @@ impl RoosteApp {
                     };
 
                     if ui
-                        .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text(copy_hint))
+                        .add_enabled(
+                            has_sel,
+                            egui::Button::new(tr("Copy")).shortcut_text(copy_hint),
+                        )
                         .clicked()
                     {
                         self.run_command(&ctx, Command::Copy);
@@ -2306,7 +2367,7 @@ impl RoosteApp {
                     if ui
                         .add_enabled(
                             has_tab,
-                            egui::Button::new("Paste").shortcut_text(paste_hint),
+                            egui::Button::new(tr("Paste")).shortcut_text(paste_hint),
                         )
                         .clicked()
                     {
@@ -2314,7 +2375,7 @@ impl RoosteApp {
                         ui.close();
                     }
                     if ui
-                        .add_enabled(has_tab, egui::Button::new("Multi-line Paste…"))
+                        .add_enabled(has_tab, egui::Button::new(tr("Multi-line Paste…")))
                         .clicked()
                     {
                         self.run_command(&ctx, Command::MultilinePaste);
@@ -2324,7 +2385,7 @@ impl RoosteApp {
                     if ui
                         .add_enabled(
                             has_tab,
-                            egui::Button::new("Select All").shortcut_text(select_all_hint),
+                            egui::Button::new(tr("Select All")).shortcut_text(select_all_hint),
                         )
                         .clicked()
                     {
@@ -2334,7 +2395,7 @@ impl RoosteApp {
                     if ui
                         .add_enabled(
                             has_tab,
-                            egui::Button::new("Find in terminal…").shortcut_text(find_hint),
+                            egui::Button::new(tr("Find in terminal…")).shortcut_text(find_hint),
                         )
                         .clicked()
                     {
@@ -2342,7 +2403,7 @@ impl RoosteApp {
                         ui.close();
                     }
                     if ui
-                        .add_enabled(has_tab, egui::Button::new("Clear Scrollback"))
+                        .add_enabled(has_tab, egui::Button::new(tr("Clear Scrollback")))
                         .clicked()
                     {
                         self.run_command(&ctx, Command::ClearScrollback);
@@ -2350,7 +2411,7 @@ impl RoosteApp {
                     }
                     ui.separator();
                     if ui
-                        .add(egui::Button::new("Settings…").shortcut_text(settings_hint))
+                        .add(egui::Button::new(tr("Settings…")).shortcut_text(settings_hint))
                         .clicked()
                     {
                         self.dialog = Some(Dialog::Settings(SettingsEditor {
@@ -2361,9 +2422,9 @@ impl RoosteApp {
                 });
 
                 // 3. View
-                ui.menu_button("View", |ui| {
+                ui.menu_button(tr("View"), |ui| {
                     if ui
-                        .checkbox(&mut self.show_manager, "Session manager")
+                        .checkbox(&mut self.show_manager, tr("Session manager"))
                         .clicked()
                     {
                         ui.close();
@@ -2374,7 +2435,7 @@ impl RoosteApp {
                         "Ctrl+Shift+P"
                     };
                     if ui
-                        .add(egui::Button::new("Command palette…").shortcut_text(palette_hint))
+                        .add(egui::Button::new(tr("Command palette…")).shortcut_text(palette_hint))
                         .clicked()
                     {
                         self.dialog = Some(Dialog::Palette {
@@ -2384,9 +2445,9 @@ impl RoosteApp {
                     }
                     ui.separator();
                     for (label, shortcut, command) in [
-                        ("Zoom in", "Ctrl +", Command::ZoomIn),
-                        ("Zoom out", "Ctrl −", Command::ZoomOut),
-                        ("Reset zoom", "Ctrl 0", Command::ResetZoom),
+                        (tr("Zoom in"), "Ctrl +", Command::ZoomIn),
+                        (tr("Zoom out"), "Ctrl −", Command::ZoomOut),
+                        (tr("Reset zoom"), "Ctrl 0", Command::ResetZoom),
                     ] {
                         let button = egui::Button::new(label).shortcut_text(shortcut);
                         if ui.add_enabled(has_tab, button).clicked() {
@@ -2397,11 +2458,11 @@ impl RoosteApp {
                 });
 
                 // 4. Tab
-                ui.menu_button("Tab", |ui| {
+                ui.menu_button(tr("Tab"), |ui| {
                     for (label, command) in [
-                        ("Duplicate tab", Command::DuplicateTab),
-                        ("Split right", Command::SplitRight),
-                        ("Split down", Command::SplitDown),
+                        (tr("Duplicate tab"), Command::DuplicateTab),
+                        (tr("Split right"), Command::SplitRight),
+                        (tr("Split down"), Command::SplitDown),
                     ] {
                         if ui.add_enabled(has_tab, egui::Button::new(label)).clicked() {
                             self.run_command(&ctx, command);
@@ -2410,7 +2471,7 @@ impl RoosteApp {
                     }
                     ui.separator();
                     if ui
-                        .checkbox(&mut self.broadcast, "Broadcast input to all tabs")
+                        .checkbox(&mut self.broadcast, tr("Broadcast input to all tabs"))
                         .clicked()
                     {
                         self.broadcast = !self.broadcast;
@@ -2419,15 +2480,15 @@ impl RoosteApp {
                     }
                     if self.has_active_tmux() {
                         ui.separator();
-                        if ui.button("tmux: New window").clicked() {
+                        if ui.button(tr("tmux: New window")).clicked() {
                             self.run_command(&ctx, Command::TmuxNewWindow);
                             ui.close();
                         }
-                        if ui.button("tmux: Synchronize panes").clicked() {
+                        if ui.button(tr("tmux: Synchronize panes")).clicked() {
                             self.run_command(&ctx, Command::TmuxToggleSyncPanes);
                             ui.close();
                         }
-                        if ui.button("tmux: Detach session").clicked() {
+                        if ui.button(tr("tmux: Detach session")).clicked() {
                             self.run_command(&ctx, Command::TmuxDetach);
                             ui.close();
                         }
@@ -2441,7 +2502,7 @@ impl RoosteApp {
                     if ui
                         .add_enabled(
                             has_tab,
-                            egui::Button::new("Close tab").shortcut_text(close_hint),
+                            egui::Button::new(tr("Close tab")).shortcut_text(close_hint),
                         )
                         .clicked()
                     {
@@ -2451,9 +2512,9 @@ impl RoosteApp {
                 });
 
                 // 5. Tools
-                ui.menu_button("Tools", |ui| {
+                ui.menu_button(tr("Tools"), |ui| {
                     if ui
-                        .add_enabled(has_tab, egui::Button::new("Files (SFTP)"))
+                        .add_enabled(has_tab, egui::Button::new(tr("Files (SFTP)")))
                         .clicked()
                     {
                         self.run_command(&ctx, Command::ToggleFiles);
@@ -2464,9 +2525,9 @@ impl RoosteApp {
                         .and_then(|id| self.tree.tiles.get_pane(&id))
                         .is_some_and(|tab| tab.log.is_some());
                     let log_label = if logging {
-                        "Stop logging"
+                        tr("Stop logging")
                     } else {
-                        "Start logging…"
+                        tr("Start logging…")
                     };
                     if ui
                         .add_enabled(has_tab, egui::Button::new(log_label))
@@ -2480,9 +2541,9 @@ impl RoosteApp {
                         .and_then(|id| self.tree.tiles.get_pane(&id))
                         .is_some_and(|tab| tab.recording.is_some());
                     let record_label = if recording {
-                        "Stop recording"
+                        tr("Stop recording")
                     } else {
-                        "Record session…"
+                        tr("Record session…")
                     };
                     if ui
                         .add_enabled(has_tab, egui::Button::new(record_label))
@@ -2493,13 +2554,13 @@ impl RoosteApp {
                     }
                     let scripts_dir = self.scripts_dir();
                     ui.add_enabled_ui(has_tab, |ui| {
-                        ui.menu_button("Run script", |ui| {
+                        ui.menu_button(tr("Run script"), |ui| {
                             let scripts = scripts_dir
                                 .as_deref()
                                 .map(crate::scripting::list_scripts)
                                 .unwrap_or_default();
                             if scripts.is_empty() {
-                                ui.weak("No scripts yet");
+                                ui.weak(tr("No scripts yet"));
                             }
                             for name in scripts {
                                 if ui.button(&name).clicked() {
@@ -2508,24 +2569,24 @@ impl RoosteApp {
                                 }
                             }
                             ui.separator();
-                            if ui.button("Open scripts folder").clicked() {
+                            if ui.button(tr("Open scripts folder")).clicked() {
                                 self.open_scripts_folder();
                                 ui.close();
                             }
                         });
                     });
                     ui.separator();
-                    if ui.button("SSH agent…").clicked() {
+                    if ui.button(tr("SSH agent…")).clicked() {
                         let mut window = AgentWindow::default();
                         self.agent_action(&mut window, AgentAction::Refresh);
                         self.dialog = Some(Dialog::Agent(Box::new(window)));
                         ui.close();
                     }
-                    if ui.button("Key generator…").clicked() {
+                    if ui.button(tr("Key generator…")).clicked() {
                         self.dialog = Some(Dialog::KeyGenerator(Box::default()));
                         ui.close();
                     }
-                    if ui.button("Convert key (PuTTY / OpenSSH)…").clicked() {
+                    if ui.button(tr("Convert key (PuTTY / OpenSSH)…")).clicked() {
                         self.dialog = Some(Dialog::KeyConverter(Box::default()));
                         ui.close();
                     }
@@ -2535,34 +2596,34 @@ impl RoosteApp {
                 let mut toolbar_actions = Vec::new();
                 if self.vault.is_some() {
                     let has_legacy_profiles = !self.config.profiles.is_empty();
-                    ui.menu_button("Vault", |ui| {
+                    ui.menu_button(tr("Vault"), |ui| {
                         if let Some(ref mut vault) = self.vault {
                             if !vault.enabled {
                                 let label = if has_legacy_profiles {
-                                    "Upgrade & Migrate to Encrypted Vault…"
+                                    tr("Upgrade & Migrate to Encrypted Vault…")
                                 } else {
-                                    "Initialize / Recover Encrypted Vault…"
+                                    tr("Initialize / Recover Encrypted Vault…")
                                 };
                                 if ui.button(label).clicked() {
                                     vault.open_onboarding(has_legacy_profiles);
                                     ui.close();
                                 }
                             } else {
-                                if ui.button("Managed SSH Keys…").clicked() {
+                                if ui.button(tr("Managed SSH Keys…")).clicked() {
                                     vault.open_keys_manager();
                                     ui.close();
                                 }
-                                if ui.button("Vault & Sync Settings…").clicked() {
+                                if ui.button(tr("Vault & Sync Settings…")).clicked() {
                                     vault.open_sync_settings();
                                     ui.close();
                                 }
                                 if vault.unlocked {
-                                    if ui.button("Sync Now").clicked() {
+                                    if ui.button(tr("Sync Now")).clicked() {
                                         vault.trigger_sync_now();
                                         ui.close();
                                     }
                                     ui.separator();
-                                    if ui.button("Lock Vault").clicked() {
+                                    if ui.button(tr("Lock Vault")).clicked() {
                                         toolbar_actions.push(vault.lock_now());
                                         ui.close();
                                     }
@@ -2573,12 +2634,12 @@ impl RoosteApp {
                 }
 
                 // 7. Help (Always last!)
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Check for updates").clicked() {
+                ui.menu_button(tr("Help"), |ui| {
+                    if ui.button(tr("Check for updates")).clicked() {
                         self.check_for_updates(true);
                         ui.close();
                     }
-                    if ui.button("Project page").clicked() {
+                    if ui.button(tr("Project page")).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(
                             "https://github.com/rooste-ssh/rooste-ssh",
                         ));
@@ -2596,8 +2657,11 @@ impl RoosteApp {
                         "Ctrl+,"
                     };
                     if ui
-                        .button("⚙ Settings")
-                        .on_hover_text(format!("Preferences ({settings_hint})"))
+                        .button(tr("⚙ Settings"))
+                        .on_hover_text(tr_fmt(
+                            "Preferences ({shortcut})",
+                            &[("shortcut", settings_hint)],
+                        ))
                         .clicked()
                     {
                         self.dialog = Some(Dialog::Settings(SettingsEditor {
@@ -2628,7 +2692,7 @@ impl RoosteApp {
                     ui.hyperlink_to(label, url);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("×").on_hover_text("Dismiss").clicked() {
+                    if ui.small_button("×").on_hover_text(tr("Dismiss")).clicked() {
                         self.notice = None;
                     }
                 });
@@ -2643,7 +2707,9 @@ impl RoosteApp {
             ui.vertical_centered(|ui| {
                 ui.heading("Rooste SSH");
                 ui.add_space(4.0);
-                ui.label(RichText::new("Double-click a saved session, or connect quickly:").weak());
+                ui.label(
+                    RichText::new(tr("Double-click a saved session, or connect quickly:")).weak(),
+                );
             });
             ui.add_space(24.0);
             // Center the form, with at least a small gap from the panel edge.
@@ -2659,7 +2725,7 @@ impl RoosteApp {
                     let layout = egui::Layout::top_down(egui::Align::Center);
                     ui.allocate_ui_with_layout(size, layout, |ui| {
                         let connect =
-                            egui::Button::new("Connect").min_size(egui::vec2(140.0, 32.0));
+                            egui::Button::new(tr("Connect")).min_size(egui::vec2(140.0, 32.0));
                         submit |= crate::theme::primary(ui, |ui| ui.add(connect)).clicked();
                     });
                     if submit {
@@ -2689,13 +2755,13 @@ impl RoosteApp {
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.end_row();
                 };
-                field(ui, "Host", &mut self.quick.host, false);
-                field(ui, "Port", &mut self.quick.port, false);
-                field(ui, "User", &mut self.quick.user, false);
-                field(ui, "Password", &mut self.quick.password, true);
+                field(ui, tr("Host"), &mut self.quick.host, false);
+                field(ui, tr("Port"), &mut self.quick.port, false);
+                field(ui, tr("User"), &mut self.quick.user, false);
+                field(ui, tr("Password"), &mut self.quick.password, true);
                 let key_file = path_row(
                     ui,
-                    "Key file",
+                    tr("Key file"),
                     &mut self.quick.key_file,
                     &mut self.picker,
                     PickId::QuickKeyFile,
@@ -2703,11 +2769,13 @@ impl RoosteApp {
                 );
                 submit |= key_file.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.label("");
-                ui.checkbox(&mut self.quick.use_agent, "Use SSH agent");
+                ui.checkbox(&mut self.quick.use_agent, tr("Use SSH agent"));
                 ui.end_row();
                 ui.label("");
-                ui.checkbox(&mut self.quick.allow_legacy, "Allow legacy algorithms")
-                    .on_hover_text("Offer outdated SHA-1 and CBC algorithms for old devices");
+                ui.checkbox(&mut self.quick.allow_legacy, tr("Allow legacy algorithms"))
+                    .on_hover_text(tr(
+                        "Offer outdated SHA-1 and CBC algorithms for old devices",
+                    ));
                 ui.end_row();
             });
         if let Some(error) = &self.quick_error {
@@ -2807,12 +2875,16 @@ impl RoosteApp {
                     .profile(id)
                     .map(Profile::display_name)
                     .unwrap_or_default();
+                let msg = tr_fmt(
+                    "Delete the saved session \"{name}\"?",
+                    &[("name", &name)],
+                );
                 match dialogs::confirm(
                     ctx,
                     "delete-profile",
-                    "Delete session",
-                    &format!("Delete the saved session \"{name}\"?"),
-                    "Delete",
+                    tr("Delete session"),
+                    &msg,
+                    tr("Delete"),
                 ) {
                     Decision::Pending => true,
                     Decision::Cancel => false,
@@ -2837,9 +2909,9 @@ impl RoosteApp {
                 match dialogs::confirm(
                     ctx,
                     "close-tab",
-                    "Close tab",
-                    "This tab has an active connection. Close it?",
-                    "Close",
+                    tr("Close tab"),
+                    tr("This tab has an active connection. Close it?"),
+                    tr("Close"),
                 ) {
                     Decision::Pending => true,
                     Decision::Cancel => false,
@@ -2897,13 +2969,13 @@ impl RoosteApp {
                 egui::Modal::new(egui::Id::unique("quick-connect-dialog"))
                     .frame(crate::theme::dialog_frame(ctx))
                     .show(ctx, |ui| {
-                        ui.heading("Quick connect");
+                        ui.heading(tr("Quick connect"));
                         ui.add_space(10.0);
                         let mut submit = self.quick_form(ui);
                         let mut cancel = false;
                         crate::dialogs::footer(ui, |ui| {
-                            cancel = ui.button("Cancel").clicked();
-                            submit |= crate::theme::primary_button(ui, "Connect").clicked();
+                            cancel = ui.button(tr("Cancel")).clicked();
+                            submit |= crate::theme::primary_button(ui, tr("Connect")).clicked();
                         });
                         if cancel || (submit && self.quick_connect(ctx)) {
                             keep = false;

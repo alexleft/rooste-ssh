@@ -11,6 +11,7 @@ use rooste_core::RightClickAction;
 use rooste_terminal::input::{self, MouseAction, MouseButton};
 use rooste_terminal::{CursorShape, MouseReport, Rgb, Screen, SelectionKind, Terminal};
 
+use crate::i18n::{tr, tr_fmt};
 use crate::keys::{Action, KeyTranslator};
 
 const MULTI_CLICK: Duration = Duration::from_millis(400);
@@ -301,9 +302,10 @@ impl TerminalView {
     pub fn flash_copied_banner(&mut self, text: &str) {
         let lines = text.lines().count().max(1);
         let label = if lines > 1 {
-            format!("Copied {lines} lines")
+            let count = lines.to_string();
+            tr_fmt("Copied {lines} lines", &[("lines", &count)])
         } else {
-            "Copied".to_owned()
+            tr("Copied").to_owned()
         };
         self.copied_banner = Some((label, Instant::now()));
     }
@@ -358,14 +360,17 @@ impl TerminalView {
 
         response.context_menu(|ui| {
             if ui
-                .add_enabled(has_sel, egui::Button::new("Copy").shortcut_text(copy_hint))
+                .add_enabled(
+                    has_sel,
+                    egui::Button::new(tr("Copy")).shortcut_text(copy_hint),
+                )
                 .clicked()
             {
                 self.copy_selection(ui.ctx(), term, true);
                 ui.close();
             }
             if ui
-                .add(egui::Button::new("Paste").shortcut_text(paste_hint))
+                .add(egui::Button::new(tr("Paste")).shortcut_text(paste_hint))
                 .clicked()
             {
                 if let Some(text) = read_clipboard() {
@@ -373,26 +378,26 @@ impl TerminalView {
                 }
                 ui.close();
             }
-            if ui.button("Multi-line Paste…").clicked() {
+            if ui.button(tr("Multi-line Paste…")).clicked() {
                 self.multiline_paste = Some(read_clipboard().unwrap_or_default());
                 ui.close();
             }
             ui.separator();
             if ui
-                .add(egui::Button::new("Select All").shortcut_text(select_all_hint))
+                .add(egui::Button::new(tr("Select All")).shortcut_text(select_all_hint))
                 .clicked()
             {
                 term.select_all();
                 ui.close();
             }
             if ui
-                .add(egui::Button::new("Find…").shortcut_text(find_hint))
+                .add(egui::Button::new(tr("Find…")).shortcut_text(find_hint))
                 .clicked()
             {
                 out.open_find = true;
                 ui.close();
             }
-            if ui.button("Clear Scrollback").clicked() {
+            if ui.button(tr("Clear Scrollback")).clicked() {
                 term.clear_scrollback();
                 ui.close();
             }
@@ -415,16 +420,18 @@ impl TerminalView {
             .show(ctx, |ui| {
                 ui.set_min_width(480.0);
                 ui.set_max_width(580.0);
-                ui.heading("Multi-line Paste");
+                ui.heading(tr("Multi-line Paste"));
                 let line_count = if text.is_empty() {
                     0
                 } else {
                     text.lines().count().max(1)
                 };
+                let lines_str = line_count.to_string();
+                let chars_str = text.chars().count().to_string();
                 ui.label(
-                    RichText::new(format!(
-                        "Review or edit before sending to the terminal ({line_count} line(s), {} char(s)).",
-                        text.chars().count()
+                    RichText::new(tr_fmt(
+                        "Review or edit before sending to the terminal ({lines} line(s), {chars} char(s)).",
+                        &[("lines", &lines_str), ("chars", &chars_str)],
                     ))
                     .small()
                     .weak(),
@@ -443,14 +450,14 @@ impl TerminalView {
                     });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         keep_open = false;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let non_empty = !text.is_empty();
                         if ui
                             .add_enabled_ui(non_empty, |ui| {
-                                crate::theme::primary_button(ui, "Paste")
+                                crate::theme::primary_button(ui, tr("Paste"))
                             })
                             .inner
                             .clicked()
@@ -460,8 +467,8 @@ impl TerminalView {
                             self.focus_requested = true;
                         }
                         if ui
-                            .add_enabled(non_empty, egui::Button::new("Paste as Single Line"))
-                            .on_hover_text("Join all lines with spaces before sending")
+                            .add_enabled(non_empty, egui::Button::new(tr("Paste as Single Line")))
+                            .on_hover_text(tr("Join all lines with spaces before sending"))
                             .clicked()
                         {
                             let single = collapse_to_single_line(&text);

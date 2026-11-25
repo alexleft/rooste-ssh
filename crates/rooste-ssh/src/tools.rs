@@ -7,6 +7,7 @@ use egui::{Id, Modal, RichText, Ui};
 use rooste_keys::{Agent, KeyType, PublicKey, ppk};
 
 use crate::dialogs::Decision;
+use crate::i18n::{tr, tr_fmt};
 use crate::picker::{PickId, PickKind, Picker, path_row};
 
 fn field(ui: &mut Ui, label: &str, value: &mut String, password: bool) -> egui::Response {
@@ -67,7 +68,7 @@ impl KeyGenerator {
     fn generate(&mut self) {
         self.error = None;
         if self.passphrase != self.confirm {
-            self.error = Some("The passphrases do not match.".into());
+            self.error = Some(tr("The passphrases do not match.").into());
             return;
         }
         let path = rooste_core::expand_tilde(self.path.trim());
@@ -87,11 +88,16 @@ impl KeyGenerator {
         Modal::new(Id::unique("key-generator"))
             .frame(crate::theme::dialog_frame(ctx))
             .show(ctx, |ui| {
-                ui.heading("Key generator");
+                ui.heading(tr("Key generator"));
                 ui.add_space(10.0);
                 if let Some((line, path)) = &self.result {
-                    ui.label(format!("Saved to {path} and {path}.pub."));
-                    ui.label("Add this public key to ~/.ssh/authorized_keys on your servers:");
+                    ui.label(tr_fmt(
+                        "Saved to {path} and {path}.pub.",
+                        &[("path", path)],
+                    ));
+                    ui.label(tr(
+                        "Add this public key to ~/.ssh/authorized_keys on your servers:",
+                    ));
                     let mut text = line.clone();
                     ui.add(
                         egui::TextEdit::multiline(&mut text)
@@ -100,10 +106,10 @@ impl KeyGenerator {
                             .desired_width(420.0),
                     );
                     crate::dialogs::footer(ui, |ui| {
-                        if ui.button("Close").clicked() {
+                        if ui.button(tr("Close")).clicked() {
                             decision = Decision::Accept(());
                         }
-                        if ui.button("Copy public key").clicked() {
+                        if ui.button(tr("Copy public key")).clicked() {
                             ui.ctx().copy_text(line.clone());
                         }
                     });
@@ -113,7 +119,7 @@ impl KeyGenerator {
                     .num_columns(2)
                     .spacing(crate::theme::FORM_SPACING)
                     .show(ui, |ui| {
-                        ui.label("Type");
+                        ui.label(tr("Type"));
                         let before = self.kind;
                         egui::ComboBox::from_id_salt("key-type")
                             .selected_text(self.kind.label())
@@ -126,12 +132,12 @@ impl KeyGenerator {
                             self.path = ssh_dir().join(self.kind.file_name()).display().to_string();
                         }
                         ui.end_row();
-                        field(ui, "Comment", &mut self.comment, false);
-                        field(ui, "Passphrase", &mut self.passphrase, true);
-                        field(ui, "Repeat passphrase", &mut self.confirm, true);
+                        field(ui, tr("Comment"), &mut self.comment, false);
+                        field(ui, tr("Passphrase"), &mut self.passphrase, true);
+                        field(ui, tr("Repeat passphrase"), &mut self.confirm, true);
                         path_row(
                             ui,
-                            "Save as",
+                            tr("Save as"),
                             &mut self.path,
                             picker,
                             PickId::KeyGenSave,
@@ -139,16 +145,18 @@ impl KeyGenerator {
                         );
                     });
                 if self.passphrase.is_empty() {
-                    ui.weak("Without a passphrase, anyone who gets the file can use the key.");
+                    ui.weak(tr(
+                        "Without a passphrase, anyone who gets the file can use the key.",
+                    ));
                 }
                 if let Some(error) = &self.error {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
                 crate::dialogs::footer(ui, |ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         decision = Decision::Cancel;
                     }
-                    if crate::theme::primary_button(ui, "Generate").clicked() {
+                    if crate::theme::primary_button(ui, tr("Generate")).clicked() {
                         self.generate();
                     }
                 });
@@ -190,12 +198,20 @@ impl KeyConverter {
             if text.trim_start().starts_with("PuTTY-User-Key-File-") {
                 rooste_keys::save_openssh(&key, &output, new_passphrase)
                     .map_err(|e| e.to_string())?;
-                Ok(format!("Saved an OpenSSH key to {}.", output.display()))
+                let out_path = output.display().to_string();
+                Ok(tr_fmt(
+                    "Saved an OpenSSH key to {path}.",
+                    &[("path", &out_path)],
+                ))
             } else {
                 let converted = ppk::export(&key, new_passphrase).map_err(|e| e.to_string())?;
                 rooste_keys::write_private(&output, converted.as_bytes())
                     .map_err(|e| format!("{}: {e}", output.display()))?;
-                Ok(format!("Saved a PuTTY key to {}.", output.display()))
+                let out_path = output.display().to_string();
+                Ok(tr_fmt(
+                    "Saved a PuTTY key to {path}.",
+                    &[("path", &out_path)],
+                ))
             }
         })();
         match result {
@@ -209,18 +225,18 @@ impl KeyConverter {
         Modal::new(Id::unique("key-converter"))
             .frame(crate::theme::dialog_frame(ctx))
             .show(ctx, |ui| {
-                ui.heading("Convert key");
+                ui.heading(tr("Convert key"));
                 ui.add_space(10.0);
-                ui.label(
+                ui.label(tr(
                     "PuTTY keys (.ppk) become OpenSSH keys, and OpenSSH keys become .ppk files.",
-                );
+                ));
                 egui::Grid::new("convert")
                     .num_columns(2)
                     .spacing(crate::theme::FORM_SPACING)
                     .show(ui, |ui| {
                         let input = path_row(
                             ui,
-                            "Key file",
+                            tr("Key file"),
                             &mut self.input,
                             picker,
                             PickId::ConvertInput,
@@ -229,16 +245,16 @@ impl KeyConverter {
                         if input.changed() && self.output.is_empty() {
                             // Suggest an output name next to the input.
                         }
-                        field(ui, "Passphrase", &mut self.passphrase, true);
+                        field(ui, tr("Passphrase"), &mut self.passphrase, true);
                         path_row(
                             ui,
-                            "Save as",
+                            tr("Save as"),
                             &mut self.output,
                             picker,
                             PickId::ConvertOutput,
                             PickKind::SaveFile,
                         );
-                        field(ui, "New passphrase", &mut self.new_passphrase, true);
+                        field(ui, tr("New passphrase"), &mut self.new_passphrase, true);
                     });
                 if self.output.trim().is_empty() && !self.input.trim().is_empty() {
                     let input = self.input.trim();
@@ -254,10 +270,10 @@ impl KeyConverter {
                     ui.colored_label(ui.visuals().error_fg_color, error);
                 }
                 crate::dialogs::footer(ui, |ui| {
-                    if ui.button("Close").clicked() {
+                    if ui.button(tr("Close")).clicked() {
                         decision = Decision::Cancel;
                     }
-                    if crate::theme::primary_button(ui, "Convert").clicked() {
+                    if crate::theme::primary_button(ui, tr("Convert")).clicked() {
                         self.convert();
                     }
                 });
@@ -296,47 +312,47 @@ impl AgentWindow {
         let mut decision = Decision::Pending;
         let mut action = None;
         Modal::new(Id::unique("agent")).frame(crate::theme::dialog_frame(ctx)).show(ctx, |ui| {
-ui.heading("SSH agent");
+ui.heading(tr("SSH agent"));
 ui.add_space(10.0);
             match agent {
                 None => {
-                    ui.label("The built-in agent holds your keys in memory and offers them when you log in.");
-                    if crate::theme::primary_button(ui, "Start agent").clicked() {
+                    ui.label(tr("The built-in agent holds your keys in memory and offers them when you log in."));
+                    if crate::theme::primary_button(ui, tr("Start agent")).clicked() {
                         action = Some(AgentAction::Start);
                     }
                 }
                 Some(agent) => {
-                    ui.label("Running. Other programs can use it with:");
+                    ui.label(tr("Running. Other programs can use it with:"));
                     let var = agent.path().display().to_string();
                     #[cfg(unix)]
                     let hint = format!("export SSH_AUTH_SOCK={var}");
                     #[cfg(windows)]
                     let hint = format!("set SSH_AUTH_SOCK={var}");
                     ui.monospace(&hint);
-                    ui.checkbox(use_for_sessions, "Use this agent for Rooste SSH sessions");
+                    ui.checkbox(use_for_sessions, tr("Use this agent for Rooste SSH sessions"));
                     ui.separator();
                     if self.keys.is_empty() {
-                        ui.weak("No keys loaded.");
+                        ui.weak(tr("No keys loaded."));
                     }
                     for key in &self.keys {
                         ui.horizontal(|ui| {
                             ui.label(format!("{} {}", key.algorithm(), key.comment().as_str_lossy()));
                             ui.weak(rooste_keys::fingerprint(key));
-                            if ui.small_button("Remove").clicked() {
+                            if ui.small_button(tr("Remove")).clicked() {
                                 action = Some(AgentAction::Remove(rooste_keys::fingerprint(key)));
                             }
                         });
                     }
                     ui.separator();
                     egui::Grid::new("agent-load").num_columns(2).spacing(crate::theme::FORM_SPACING).show(ui, |ui| {
-                        path_row(ui, "Key file", &mut self.key_file, picker, PickId::AgentKeyFile, PickKind::OpenFile);
-                        field(ui, "Passphrase", &mut self.passphrase, true);
+                        path_row(ui, tr("Key file"), &mut self.key_file, picker, PickId::AgentKeyFile, PickKind::OpenFile);
+                        field(ui, tr("Passphrase"), &mut self.passphrase, true);
                     });
                     ui.horizontal(|ui| {
-                        if ui.button("Load key").clicked() {
+                        if ui.button(tr("Load key")).clicked() {
                             action = Some(AgentAction::Load);
                         }
-                        if ui.button("Stop agent").clicked() {
+                        if ui.button(tr("Stop agent")).clicked() {
                             action = Some(AgentAction::Stop);
                         }
                     });
@@ -346,9 +362,9 @@ ui.add_space(10.0);
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
 ui.add_space(6.0);
-ui.label(RichText::new("Keys are kept only while Rooste SSH runs.").small().weak());
+ui.label(RichText::new(tr("Keys are kept only while Rooste SSH runs.")).small().weak());
 crate::dialogs::footer(ui, |ui| {
-    if ui.button("Close").clicked() {
+    if ui.button(tr("Close")).clicked() {
         decision = Decision::Cancel;
     }
 });

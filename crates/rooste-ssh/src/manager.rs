@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use egui::{RichText, Ui};
 use rooste_core::Profile;
 
+use crate::i18n::{tr, tr_fmt};
+
 /// What the user asked for in the session manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagerAction {
@@ -60,9 +62,9 @@ impl<'a> Folder<'a> {
 pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Option<ManagerAction> {
     let mut action = None;
     ui.horizontal(|ui| {
-        ui.heading("Sessions");
+        ui.heading(tr("Sessions"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("➕").on_hover_text("New session").clicked() {
+            if ui.button("➕").on_hover_text(tr("New session")).clicked() {
                 action = Some(ManagerAction::New);
             }
         });
@@ -70,19 +72,18 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
     let search = ui.add(
         egui::TextEdit::singleline(&mut state.search)
             .margin(crate::theme::FIELD_MARGIN)
-            .hint_text("Search")
+            .hint_text(tr("Search"))
             .desired_width(f32::INFINITY),
     );
-    search.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Search"));
+    search.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Search")));
     ui.separator();
 
     if profiles.is_empty() {
-        ui.label(RichText::new("No saved sessions yet.").weak());
+        ui.label(RichText::new(tr("No saved sessions yet.")).weak());
         ui.label(
-            RichText::new(
-                "Create one with ➕ or by right-clicking here, or import from PuTTY or \
-                 ~/.ssh/config.",
-            )
+            RichText::new(tr(
+                "Create one with ➕ or by right-clicking here, or import from PuTTY or ~/.ssh/config.",
+            ))
             .weak(),
         );
         background_menu(ui, &mut action);
@@ -102,7 +103,7 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
                     .collect();
                 matches.sort_by_key(|p| p.display_name().to_lowercase());
                 if matches.is_empty() {
-                    ui.label(RichText::new("No matching sessions.").weak());
+                    ui.label(RichText::new(tr("No matching sessions.")).weak());
                 }
                 for profile in matches {
                     profile_ui(ui, profile, true, state, &mut action);
@@ -117,7 +118,8 @@ pub fn show(ui: &mut Ui, state: &mut ManagerState, profiles: &[Profile]) -> Opti
 fn background_menu(ui: &mut Ui, action: &mut Option<ManagerAction>) {
     let size = ui.available_size().max(egui::vec2(0.0, 40.0));
     let response = ui.allocate_response(size, egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::List, true, "Session list"));
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::List, true, tr("Session list")));
     response.context_menu(|ui| {
         let mut item = |ui: &mut Ui, label: &str, chosen: ManagerAction| {
             if ui.button(label).clicked() {
@@ -125,17 +127,17 @@ fn background_menu(ui: &mut Ui, action: &mut Option<ManagerAction>) {
                 ui.close();
             }
         };
-        item(ui, "New session…", ManagerAction::New);
-        item(ui, "Quick connect…", ManagerAction::QuickConnect);
+        item(ui, tr("New session…"), ManagerAction::New);
+        item(ui, tr("Quick connect…"), ManagerAction::QuickConnect);
         ui.separator();
         item(
             ui,
-            "Import from ~/.ssh/config",
+            tr("Import from ~/.ssh/config"),
             ManagerAction::Import { putty: false },
         );
         item(
             ui,
-            "Import from PuTTY",
+            tr("Import from PuTTY"),
             ManagerAction::Import { putty: true },
         );
     });
@@ -159,7 +161,7 @@ fn folder_ui(
             .default_open(true)
             .show(ui, |ui| folder_ui(ui, child, &child_path, state, action));
         shown.header_response.context_menu(|ui| {
-            if ui.button("New session in this folder…").clicked() {
+            if ui.button(tr("New session in this folder…")).clicked() {
                 *action = Some(ManagerAction::NewInFolder(child_path.clone()));
                 ui.close();
             }
@@ -190,7 +192,7 @@ fn profile_ui(
             profile.host,
             profile.effective_port(),
             if show_folder && !profile.folder.is_empty() {
-                format!("\nin {}", profile.folder)
+                format!("\n{}", tr_fmt("in {folder}", &[("folder", &profile.folder)]))
             } else {
                 String::new()
             }
@@ -203,16 +205,16 @@ fn profile_ui(
     }
     response.context_menu(|ui| {
         let id = profile.id.clone();
-        if ui.button("Connect").clicked() {
+        if ui.button(tr("Connect")).clicked() {
             *action = Some(ManagerAction::Connect(id.clone()));
         }
-        if ui.button("Edit…").clicked() {
+        if ui.button(tr("Edit…")).clicked() {
             *action = Some(ManagerAction::Edit(id.clone()));
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.button(tr("Duplicate")).clicked() {
             *action = Some(ManagerAction::Duplicate(id.clone()));
         }
-        if ui.button("Delete…").clicked() {
+        if ui.button(tr("Delete…")).clicked() {
             *action = Some(ManagerAction::Delete(id));
         }
     });

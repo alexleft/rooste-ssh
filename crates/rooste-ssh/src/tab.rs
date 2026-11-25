@@ -14,6 +14,7 @@ use rooste_tmux::{
 use tokio::sync::oneshot;
 
 use crate::files::FilesPanel;
+use crate::i18n::{tr, tr_fmt};
 use crate::scripting::ScriptEvent;
 use crate::session::{
     ConnectRequest, Failure, PromptKind, Session, SessionCommand, SessionEvent, SessionSender,
@@ -539,11 +540,11 @@ impl SessionTab {
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut find.query)
                             .margin(crate::theme::FIELD_MARGIN)
-                            .hint_text("Find")
+                            .hint_text(tr("Find"))
                             .desired_width(240.0),
                     );
                     edit.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Find")
+                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Find"))
                     });
                     if std::mem::take(&mut find.focus) {
                         edit.request_focus();
@@ -573,22 +574,22 @@ impl SessionTab {
                     }
                     if ui
                         .button("⬆")
-                        .on_hover_text("Previous match (Enter)")
+                        .on_hover_text(tr("Previous match (Enter)"))
                         .clicked()
                     {
                         search = Some((SearchDirection::Up, false));
                     }
                     if ui
                         .button("⬇")
-                        .on_hover_text("Next match (Shift+Enter)")
+                        .on_hover_text(tr("Next match (Shift+Enter)"))
                         .clicked()
                     {
                         search = Some((SearchDirection::Down, false));
                     }
                     if find.found == Some(false) {
-                        ui.colored_label(ui.visuals().error_fg_color, "Not found");
+                        ui.colored_label(ui.visuals().error_fg_color, tr("Not found"));
                     }
-                    if ui.button("×").on_hover_text("Close (Esc)").clicked() {
+                    if ui.button("×").on_hover_text(tr("Close (Esc)")).clicked() {
                         close = true;
                     }
                 });
@@ -794,9 +795,14 @@ impl SessionTab {
                 ScriptEvent::Finished(result) => {
                     self.script = None;
                     let (text, error) = match result {
-                        Ok(()) => (format!("Script {name} finished."), false),
-                        Err(e) if e == "cancelled" => (format!("Script {name} stopped."), false),
-                        Err(e) => (format!("Script {name} failed: {e}"), true),
+                        Ok(()) => (tr_fmt("Script {name} finished.", &[("name", &name)]), false),
+                        Err(e) if e == "cancelled" => {
+                            (tr_fmt("Script {name} stopped.", &[("name", &name)]), false)
+                        }
+                        Err(e) => (
+                            tr_fmt("Script {name} failed: {err}", &[("name", &name), ("err", &e)]),
+                            true,
+                        ),
                     };
                     self.actions.push(TabAction::Notify { text, error });
                     return;
@@ -815,8 +821,8 @@ impl SessionTab {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label(format!("Running script {name}"));
-                    stop = ui.button("Stop").clicked();
+                    ui.label(tr_fmt("Running script {name}", &[("name", &name)]));
+                    stop = ui.button(tr("Stop")).clicked();
                 });
             });
         if stop {
@@ -1072,15 +1078,24 @@ impl SessionTab {
     pub fn status_text(&self) -> String {
         match &self.state {
             TabState::Connecting(text) => text.clone(),
-            TabState::Connected => "Connected".into(),
+            TabState::Connected => tr("Connected").into(),
             TabState::Reconnecting { attempt, at } => {
-                let secs = at.saturating_duration_since(Instant::now()).as_secs() + 1;
-                format!(
-                    "Connection lost. Reconnecting in {secs}s (attempt {attempt} of {MAX_RECONNECTS})…"
+                let secs = (at.saturating_duration_since(Instant::now()).as_secs() + 1).to_string();
+                let attempt_str = attempt.to_string();
+                let max_str = MAX_RECONNECTS.to_string();
+                tr_fmt(
+                    "Connection lost. Reconnecting in {secs}s (attempt {attempt} of {max})…",
+                    &[("secs", &secs), ("attempt", &attempt_str), ("max", &max_str)],
                 )
             }
-            TabState::Closed(Some(code)) => format!("Session closed (exit status {code})"),
-            TabState::Closed(None) => "Session closed".into(),
+            TabState::Closed(Some(code)) => {
+                let code_str = code.to_string();
+                tr_fmt(
+                    "Session closed (exit status {code})",
+                    &[("code", &code_str)],
+                )
+            }
+            TabState::Closed(None) => tr("Session closed").into(),
             TabState::Failed(message) => message.clone(),
         }
     }
@@ -1132,40 +1147,50 @@ impl SessionTab {
             .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(format!("tmux -CC Gateway ({session_name})")).strong());
+                    ui.label(
+                        RichText::new(tr_fmt(
+                            "tmux -CC Gateway ({session})",
+                            &[("session", session_name)],
+                        ))
+                        .strong(),
+                    );
                     if ui
-                        .button("Detach (Esc)")
-                        .on_hover_text("Detach cleanly and keep tmux running on the server")
+                        .button(tr("Detach (Esc)"))
+                        .on_hover_text(tr(
+                            "Detach cleanly and keep tmux running on the server",
+                        ))
                         .clicked()
                     {
                         detach = true;
                     }
                     if ui
-                        .button("New tmux window")
-                        .on_hover_text("Create a new window in this tmux session")
+                        .button(tr("New tmux window"))
+                        .on_hover_text(tr("Create a new window in this tmux session"))
                         .clicked()
                     {
                         new_win = true;
                     }
                     if ui
-                        .button("Force exit (X)")
-                        .on_hover_text("Force exit tmux control mode and run stty sane")
+                        .button(tr("Force exit (X)"))
+                        .on_hover_text(tr("Force exit tmux control mode and run stty sane"))
                         .clicked()
                     {
                         force_quit = true;
                     }
-                    ui.checkbox(show_log, "Protocol log");
+                    ui.checkbox(show_log, tr("Protocol log"));
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Command:");
+                    ui.label(tr("Command:"));
                     let edit = ui.add(
                         egui::TextEdit::singleline(custom_command)
                             .margin(crate::theme::FIELD_MARGIN)
-                            .hint_text("e.g. new-window -n logs")
+                            .hint_text(tr("e.g. new-window -n logs"))
                             .desired_width(240.0),
                     );
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if (ui.button("Run").clicked() || enter) && !custom_command.trim().is_empty() {
+                    if (ui.button(tr("Run")).clicked() || enter)
+                        && !custom_command.trim().is_empty()
+                    {
                         run_cmd = Some(std::mem::take(custom_command));
                     }
                 });
@@ -1221,9 +1246,9 @@ impl SessionTab {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        "⏸ Output in this tmux pane was paused by flow control.",
+                        tr("⏸ Output in this tmux pane was paused by flow control."),
                     );
-                    if crate::theme::primary_button(ui, "Resume output").clicked() {
+                    if crate::theme::primary_button(ui, tr("Resume output")).clicked() {
                         resume = true;
                     }
                 });
@@ -1254,28 +1279,27 @@ impl SessionTab {
                     ui.add(egui::Label::new(text).wrap());
                     ui.horizontal(|ui| match self.state {
                         TabState::Reconnecting { .. } => {
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr("Cancel")).clicked() {
                                 let message = self.failure.as_ref().map_or_else(
-                                    || "Connection lost".into(),
+                                    || tr("Connection lost").into(),
                                     |f| f.message.clone(),
                                 );
                                 self.state = TabState::Failed(message);
                             }
-                            if crate::theme::primary_button(ui, "Reconnect now").clicked() {
+                            if crate::theme::primary_button(ui, tr("Reconnect now")).clicked() {
                                 self.restart();
                             }
                         }
                         TabState::Closed(_) | TabState::Failed(_) => {
-                            if ui.button("Reconnect").clicked() {
+                            if ui.button(tr("Reconnect")).clicked() {
                                 self.reconnect();
                             }
                             if self.failure.as_ref().is_some_and(|f| f.legacy_hint)
                                 && ui
-                                    .button("Allow legacy algorithms and retry")
-                                    .on_hover_text(
-                                        "This server only supports outdated SHA-1/CBC algorithms. \
-                                     Only continue if you trust the network.",
-                                    )
+                                    .button(tr("Allow legacy algorithms and retry"))
+                                    .on_hover_text(tr(
+                                        "This server only supports outdated SHA-1/CBC algorithms. Only continue if you trust the network.",
+                                    ))
                                     .clicked()
                             {
                                 self.request.allow_legacy = true;

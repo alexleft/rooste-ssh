@@ -88,10 +88,10 @@ impl Picker {
     ) -> Option<PathBuf> {
         let busy = self.pending.is_some();
         let clicked = ui
-            .add_enabled(!busy, egui::Button::new("Browse…"))
+            .add_enabled(!busy, egui::Button::new(crate::i18n::tr("Browse…")))
             .on_hover_text(match kind {
-                PickKind::Folder => "Choose a folder",
-                _ => "Choose a file",
+                PickKind::Folder => crate::i18n::tr("Choose a folder"),
+                _ => crate::i18n::tr("Choose a file"),
             })
             .clicked();
         if clicked {

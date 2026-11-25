@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use egui::{RichText, Ui};
 
+use crate::i18n::{tr, tr_fmt};
 use crate::picker::{PickId, PickKind, Picker};
 use rooste_sftp::{Entry, Sftp, format_size};
 use tokio::sync::mpsc;
@@ -595,7 +596,7 @@ impl FilesPanel {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         if self.handle.is_none() {
-            ui.label(RichText::new("Starting SFTP…").italics());
+            ui.label(RichText::new(tr("Starting SFTP…")).italics());
             return;
         }
         // Files dropped onto the window are uploaded here.
@@ -626,11 +627,11 @@ impl FilesPanel {
         }
 
         ui.horizontal(|ui| {
-            if ui.button("⬆").on_hover_text("Parent folder").clicked() {
+            if ui.button("⬆").on_hover_text(tr("Parent folder")).clicked() {
                 let parent = rooste_sftp::parent(&self.cwd);
                 self.open(&parent);
             }
-            if ui.button("⟳").on_hover_text("Refresh").clicked() {
+            if ui.button("⟳").on_hover_text(tr("Refresh")).clicked() {
                 let cwd = self.cwd.clone();
                 self.open(&cwd);
             }
@@ -640,7 +641,7 @@ impl FilesPanel {
                     .desired_width(f32::INFINITY),
             );
             path.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Remote path")
+                egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Remote path"))
             });
             if path.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 let target = self.path_input.clone();
@@ -648,20 +649,20 @@ impl FilesPanel {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            if ui.button("New folder").clicked() {
+            if ui.button(tr("New folder")).clicked() {
                 self.edit = Some(Edit::NewFolder(String::new()));
             }
             let selected = self.single_selected();
             let any_selected = !self.selected.is_empty();
             if let Some(entry) = selected.as_ref().filter(|e| e.is_dir())
-                && ui.button("Open").clicked()
+                && ui.button(tr("Open")).clicked()
             {
                 let path = entry.path.clone();
                 self.open(&path);
             }
             if ui
-                .add_enabled(any_selected, egui::Button::new("Download"))
-                .on_hover_text("Download to the download folder")
+                .add_enabled(any_selected, egui::Button::new(tr("Download")))
+                .on_hover_text(tr("Download to the download folder"))
                 .clicked()
             {
                 let dir = self.download_dir.clone();
@@ -670,9 +671,9 @@ impl FilesPanel {
             if ui
                 .add_enabled(
                     any_selected && !self.picker.is_busy(),
-                    egui::Button::new("Download to…"),
+                    egui::Button::new(tr("Download to…")),
                 )
-                .on_hover_text("Choose a folder to download to")
+                .on_hover_text(tr("Choose a folder to download to"))
                 .clicked()
             {
                 self.download_selected_to(ui.ctx());
@@ -680,23 +681,23 @@ impl FilesPanel {
             let idle = !self.picker.is_busy();
             let start = self.download_dir.display().to_string();
             if ui
-                .add_enabled(idle, egui::Button::new("Upload…"))
-                .on_hover_text("Choose files to upload here")
+                .add_enabled(idle, egui::Button::new(tr("Upload…")))
+                .on_hover_text(tr("Choose files to upload here"))
                 .clicked()
             {
                 self.picker
                     .open(ui.ctx(), PickId::UploadFiles, PickKind::OpenFiles, &start);
             }
             if ui
-                .add_enabled(idle, egui::Button::new("Upload folder…"))
-                .on_hover_text("Choose a folder to upload here, with everything in it")
+                .add_enabled(idle, egui::Button::new(tr("Upload folder…")))
+                .on_hover_text(tr("Choose a folder to upload here, with everything in it"))
                 .clicked()
             {
                 self.picker
                     .open(ui.ctx(), PickId::UploadFolder, PickKind::Folder, &start);
             }
             if ui
-                .add_enabled(selected.is_some(), egui::Button::new("Rename"))
+                .add_enabled(selected.is_some(), egui::Button::new(tr("Rename")))
                 .clicked()
                 && let Some(entry) = &selected
             {
@@ -706,7 +707,7 @@ impl FilesPanel {
                 });
             }
             if ui
-                .add_enabled(selected.is_some(), egui::Button::new("Delete"))
+                .add_enabled(selected.is_some(), egui::Button::new(tr("Delete")))
                 .clicked()
                 && let Some(entry) = selected
             {
@@ -732,7 +733,7 @@ impl FilesPanel {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 if self.entries.is_empty() {
-                    ui.weak("Empty folder");
+                    ui.weak(tr("Empty folder"));
                 }
                 for (index, entry) in self.entries.iter().enumerate() {
                     let icon = if entry.is_dir() { "📁" } else { "📄" };
@@ -758,15 +759,15 @@ impl FilesPanel {
                         }
                     }
                     response.context_menu(|ui| {
-                        if entry.is_dir() && ui.button("Open").clicked() {
+                        if entry.is_dir() && ui.button(tr("Open")).clicked() {
                             menu = Some(MenuAction::Open(entry.path.clone()));
                             ui.close();
                         }
-                        if ui.button("Download").clicked() {
+                        if ui.button(tr("Download")).clicked() {
                             menu = Some(MenuAction::Download);
                             ui.close();
                         }
-                        if ui.button("Download to…").clicked() {
+                        if ui.button(tr("Download to…")).clicked() {
                             menu = Some(MenuAction::DownloadTo);
                             ui.close();
                         }
@@ -776,7 +777,7 @@ impl FilesPanel {
                                 |n| n.to_string_lossy().into_owned(),
                             );
                             if ui
-                                .button(format!("Download to {name}"))
+                                .button(tr_fmt("Download to {name}", &[("name", &name)]))
                                 .on_hover_text(dir.display().to_string())
                                 .clicked()
                             {
@@ -808,9 +809,10 @@ impl FilesPanel {
         }
 
         ui.separator();
-        ui.weak(format!(
-            "Drop files or folders here to upload. Ctrl- or Shift-click to select several. Downloads go to {}.",
-            self.download_dir.display()
+        let dir_str = self.download_dir.display().to_string();
+        ui.weak(tr_fmt(
+            "Drop files or folders here to upload. Ctrl- or Shift-click to select several. Downloads go to {dir}.",
+            &[("dir", &dir_str)],
         ));
         let mut cancel = None;
         for transfer in self.transfers.iter().rev().take(5) {
@@ -832,12 +834,12 @@ impl FilesPanel {
                                 .desired_width(100.0)
                                 .show_percentage(),
                         );
-                        if ui.small_button("×").on_hover_text("Cancel").clicked() {
+                        if ui.small_button("×").on_hover_text(tr("Cancel")).clicked() {
                             cancel = Some(transfer.id);
                         }
                     }
                     TransferState::Done => {
-                        ui.weak("done");
+                        ui.weak(tr("done"));
                     }
                     TransferState::Failed(e) => {
                         ui.colored_label(ui.visuals().error_fg_color, e);
@@ -877,49 +879,53 @@ impl FilesPanel {
             Edit::NewFolder(name) => {
                 ui.add(
                     egui::TextEdit::singleline(name)
-                        .hint_text("folder name")
+                        .hint_text(tr("folder name"))
                         .desired_width(140.0),
                 )
                 .widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Folder name")
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Folder name"))
                 });
-                if crate::theme::primary_button(ui, "Create").clicked() && !name.trim().is_empty() {
+                if crate::theme::primary_button(ui, tr("Create")).clicked()
+                    && !name.trim().is_empty()
+                {
                     command = Some(FilesCommand::Mkdir(rooste_sftp::join(
                         &self.cwd,
                         name.trim(),
                     )));
                     done = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     done = true;
                 }
             }
             Edit::Rename { from, name } => {
                 ui.add(egui::TextEdit::singleline(name).desired_width(140.0))
                     .widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, "New name")
+                        egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("New name"))
                     });
-                if crate::theme::primary_button(ui, "Rename").clicked() && !name.trim().is_empty() {
+                if crate::theme::primary_button(ui, tr("Rename")).clicked()
+                    && !name.trim().is_empty()
+                {
                     command = Some(FilesCommand::Rename {
                         from: from.clone(),
                         to: rooste_sftp::join(&rooste_sftp::parent(from), name.trim()),
                     });
                     done = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     done = true;
                 }
             }
             Edit::Delete(entry) => {
-                ui.label(format!("Delete {}?", entry.name));
-                if crate::theme::danger_button(ui, "Delete").clicked() {
+                ui.label(tr_fmt("Delete {name}?", &[("name", &entry.name)]));
+                if crate::theme::danger_button(ui, tr("Delete")).clicked() {
                     command = Some(FilesCommand::Remove {
                         path: entry.path.clone(),
                         dir: entry.is_dir(),
                     });
                     done = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     done = true;
                 }
             }
