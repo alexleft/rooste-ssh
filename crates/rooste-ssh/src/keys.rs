@@ -10,7 +10,7 @@
 //! without Shift they send the control character (Ctrl+C copies instead
 //! when text is selected).
 
-use egui::{Event, Key, Modifiers};
+use egui::{Event, ImeEvent, Key, Modifiers};
 use rooste_terminal::input::{self, InputMode, Key as TermKey, Modifiers as TermMods};
 
 /// What a single egui event means for the terminal.
@@ -54,6 +54,14 @@ impl KeyTranslator {
                     return None;
                 }
                 Some(Action::Send(text.as_bytes().to_vec()))
+            }
+            Event::Ime(ImeEvent::Commit(text)) => {
+                self.skip_text = None;
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(Action::Send(text.as_bytes().to_vec()))
+                }
             }
             // On macOS ⌘C, ⌘X and ⌘V are the clipboard keys; Ctrl+C reaches
             // the terminal as a key press and interrupts as usual.
@@ -390,6 +398,26 @@ mod tests {
         assert_eq!(
             t.translate(&key(Key::Insert, shift), shift, mode, false, true),
             Some(Action::PasteFromClipboard)
+        );
+    }
+
+    #[test]
+    fn ime_commit_and_preedit() {
+        let mut t = KeyTranslator::default();
+        assert_eq!(
+            send(
+                &mut t,
+                Event::Ime(ImeEvent::Preedit {
+                    text: "nihao".into(),
+                    active_range_chars: None,
+                })
+            ),
+            None
+        );
+        assert_eq!(send(&mut t, Event::Ime(ImeEvent::Commit("".into()))), None);
+        assert_eq!(
+            send(&mut t, Event::Ime(ImeEvent::Commit("你好".into()))).unwrap(),
+            "你好".as_bytes()
         );
     }
 }

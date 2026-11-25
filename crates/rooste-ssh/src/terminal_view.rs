@@ -4,8 +4,8 @@
 use std::time::{Duration, Instant};
 
 use egui::{
-    Color32, CornerRadius, Event, FontId, Id, Modal, PointerButton, Pos2, Rect, Response, RichText,
-    Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
+    Color32, CornerRadius, Event, FontId, Id, ImeEvent, Modal, PointerButton, Pos2, Rect, Response,
+    RichText, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use rooste_core::RightClickAction;
 use rooste_terminal::input::{self, MouseAction, MouseButton};
@@ -79,6 +79,8 @@ pub struct TerminalView {
     pub focus_requested: bool,
     /// Whether the terminal had keyboard focus when last shown.
     pub has_focus: bool,
+    /// Active IME preedit (composition) text, shown at the cursor while composing.
+    ime_preedit: Option<String>,
 }
 
 impl Default for TerminalView {
@@ -101,6 +103,7 @@ impl Default for TerminalView {
             scrollbar_grab: None,
             focus_requested: false,
             has_focus: false,
+            ime_preedit: None,
         }
     }
 }
@@ -219,8 +222,11 @@ impl TerminalView {
             origin: rect.min + vec2(PADDING, PADDING),
         };
 
+        let owns_ime = ui.memory(|m| m.owns_ime_events(id));
         if response.has_focus() && self.multiline_paste.is_none() {
-            self.handle_keyboard(ui, term, &mut out);
+            self.handle_keyboard(ui, owns_ime, term, &mut out);
+        } else {
+            self.ime_preedit = None;
         }
         let hovered = response.hovered() || bar.hovered();
         if self.multiline_paste.is_none() {
@@ -247,7 +253,35 @@ impl TerminalView {
         if self.has_focus {
             self.focus_requested = false;
         }
-        self.paint(ui, rect, metrics, &term.screen(), self.has_focus);
+        let screen = term.screen();
+        if owns_ime && self.multiline_paste.is_none() {
+            let cursor_rect = if let Some((col, row)) = screen.cursor
+                && let Some(&c) = screen.row(row).get(col)
+            {
+                Rect::from_min_size(
+                    pos2(
+                        metrics.origin.x + col as f32 * cell.x,
+                        metrics.origin.y + row as f32 * cell.y,
+                    ),
+                    vec2(if c.wide { 2.0 } else { 1.0 } * cell.x, cell.y),
+                )
+            } else {
+                Rect::from_min_size(metrics.origin, cell)
+            };
+            let to_global = ui
+                .ctx()
+                .layer_transform_to_global(ui.layer_id())
+                .unwrap_or_default();
+            ui.output_mut(|o| {
+                o.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Terminal,
+                    rect: to_global * text_rect,
+                    cursor_rect: to_global * cursor_rect,
+                    should_interrupt_composition: false,
+                });
+            });
+        }
+        self.paint(ui, rect, metrics, &screen, self.has_focus);
         self.paint_copied_banner(ui, text_rect);
         if let Some(thumb) = thumb {
             let widgets = &ui.visuals().widgets;
@@ -483,9 +517,33 @@ impl TerminalView {
         painter.galley(pill.min + pad, galley, crate::theme::NORDIC_SNOW);
     }
 
-    fn handle_keyboard(&mut self, ui: &Ui, term: &mut Terminal, out: &mut ViewOutput) {
+    fn handle_keyboard(
+        &mut self,
+        ui: &Ui,
+        owns_ime: bool,
+        term: &mut Terminal,
+        out: &mut ViewOutput,
+    ) {
         let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
         for event in &events {
+            if let Event::Ime(ime_event) = event {
+                if !owns_ime {
+                    continue;
+                }
+                match ime_event {
+                    ImeEvent::Preedit { text, .. } => {
+                        self.ime_preedit = (!text.is_empty()).then(|| text.clone());
+                    }
+                    ImeEvent::Commit(_) => {
+                        self.ime_preedit = None;
+                    }
+                    #[expect(deprecated)]
+                    ImeEvent::Disabled => {
+                        self.ime_preedit = None;
+                    }
+                    _ => {}
+                }
+            }
             let has_selection = term.selection_text().is_some();
             match self.keys.translate(
                 event,
@@ -894,6 +952,47 @@ impl TerminalView {
                 }
             }
         }
+
+        if focused
+            && let Some(preedit) = self.ime_preedit.as_deref()
+            && !preedit.is_empty()
+        {
+            let (anchor, fg_rgb) = if let Some((col, row)) = screen.cursor
+                && let Some(&c) = screen.row(row).get(col)
+            {
+                (
+                    pos2(
+                        metrics.origin.x + col as f32 * cell.x,
+                        metrics.origin.y + row as f32 * cell.y,
+                    ),
+                    c.fg,
+                )
+            } else {
+                (metrics.origin, screen.cursor_color)
+            };
+            let fg = color(fg_rgb);
+            let mut job = egui::text::LayoutJob::single_section(
+                preedit.to_owned(),
+                egui::TextFormat::simple(font, fg),
+            );
+            job.wrap.max_width = f32::INFINITY;
+            let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+            let size = galley.size().max(cell);
+            let x = anchor
+                .x
+                .min((rect.right() - PADDING - size.x).max(metrics.origin.x));
+            let preedit_rect = Rect::from_min_size(pos2(x, anchor.y), size);
+            painter.rect_filled(preedit_rect, 0.0, color(screen.background));
+            painter.galley(preedit_rect.min, galley, fg);
+            let uy = preedit_rect.bottom() - 1.5;
+            painter.line_segment(
+                [
+                    pos2(preedit_rect.left(), uy),
+                    pos2(preedit_rect.right(), uy),
+                ],
+                Stroke::new(1.5, color(screen.cursor_color)),
+            );
+        }
     }
 }
 
@@ -927,5 +1026,93 @@ mod tests {
         // Clamped to the grid.
         assert_eq!(m.cell_at(pos2(5000.0, 5000.0), 80, 24), (79, 23, false));
         assert_eq!(m.cell_at(pos2(0.0, 0.0), 80, 24), (0, 0, false));
+    }
+
+    #[test]
+    fn ime_output_enabled_when_focused() {
+        let ctx = egui::Context::default();
+        let mut view = TerminalView::default();
+        let mut term = Terminal::new(80, 24);
+        view.focus_requested = true;
+
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))),
+            ..Default::default()
+        };
+        let mut full = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                view.show(ui, &mut term);
+            });
+        });
+        full.textures_delta.clear();
+
+        let ime = full
+            .platform_output
+            .ime
+            .expect("focused terminal must enable IME output");
+        assert_eq!(ime.purpose, egui::IMEPurpose::Terminal);
+    }
+
+    #[test]
+    fn ime_preedit_and_commit_flow() {
+        let ctx = egui::Context::default();
+        let mut view = TerminalView::default();
+        let mut term = Terminal::new(80, 24);
+        view.focus_requested = true;
+
+        let screen = Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+        // First frame acquires focus.
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: screen,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    view.show(ui, &mut term);
+                });
+            },
+        );
+        full.textures_delta.clear();
+        assert!(view.has_focus);
+
+        // Preedit updates state without sending bytes.
+        let mut out_preedit = ViewOutput::default();
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: screen,
+                events: vec![Event::Ime(ImeEvent::Preedit {
+                    text: "ni".into(),
+                    active_range_chars: None,
+                })],
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    out_preedit = view.show(ui, &mut term);
+                });
+            },
+        );
+        full.textures_delta.clear();
+        assert_eq!(view.ime_preedit.as_deref(), Some("ni"));
+        assert!(out_preedit.send.is_empty());
+
+        // Commit clears preedit and emits UTF-8 bytes.
+        let mut out_commit = ViewOutput::default();
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: screen,
+                events: vec![Event::Ime(ImeEvent::Commit("你".into()))],
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    out_commit = view.show(ui, &mut term);
+                });
+            },
+        );
+        full.textures_delta.clear();
+        assert_eq!(view.ime_preedit, None);
+        assert_eq!(out_commit.send, "你".as_bytes());
     }
 }

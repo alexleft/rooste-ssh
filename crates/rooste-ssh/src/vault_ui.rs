@@ -992,6 +992,7 @@ impl VaultController {
                                 edit.request_focus();
                             }
                         }
+                        disable_ime_for_password_field(ui, &edit, state.needs_focus);
                         let enter =
                             edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                         if let Some(ref err) = state.error {
@@ -3554,6 +3555,12 @@ fn extract_key_fingerprint(label: &str, pem: &str, passphrase: Option<&str>) -> 
     }
 }
 
+fn disable_ime_for_password_field(ui: &egui::Ui, edit: &egui::Response, needs_focus: bool) {
+    if edit.has_focus() || needs_focus {
+        ui.output_mut(|o| o.ime = None);
+    }
+}
+
 fn format_sync_report(report: &SyncReport) -> String {
     if report.up_to_date {
         format!("Up to date (seq {})", report.manifest_sequence)
@@ -3567,5 +3574,71 @@ fn format_sync_report(report: &SyncReport) -> String {
             "Synced: ↓{} ↑{} (seq {})",
             report.pulled, report.pushed, report.manifest_sequence
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_screen_password_disables_ime() {
+        let ctx = egui::Context::default();
+        let mut pw = String::new();
+        let mut needs_focus = true;
+        let screen = Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(600.0, 400.0),
+        ));
+
+        // Frame 1: request focus on the password field.
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: screen,
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut pw)
+                            .id_salt("vault_lock_screen_password")
+                            .password(true),
+                    );
+                    if needs_focus {
+                        if edit.has_focus() {
+                            needs_focus = false;
+                        } else {
+                            edit.request_focus();
+                        }
+                    }
+                    disable_ime_for_password_field(ui, &edit, needs_focus);
+                });
+            },
+        );
+        full.textures_delta.clear();
+        assert!(full.platform_output.ime.is_none());
+
+        // Frame 2: focused password field keeps IME disabled and still accepts ASCII text.
+        let mut full = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: screen,
+                events: vec![egui::Event::Text("Abc123!".into())],
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut pw)
+                            .id_salt("vault_lock_screen_password")
+                            .password(true),
+                    );
+                    assert!(edit.has_focus());
+                    disable_ime_for_password_field(ui, &edit, false);
+                });
+            },
+        );
+        full.textures_delta.clear();
+        assert!(full.platform_output.ime.is_none());
+        assert_eq!(pw, "Abc123!");
     }
 }
