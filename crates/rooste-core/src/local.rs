@@ -103,6 +103,8 @@ pub struct LocalConfig {
     pub log_dir: String,
     /// Release tag skipped by the user.
     pub skipped_version: String,
+    /// Ask GitHub for a newer release at startup.
+    pub check_updates: bool,
     /// Idle auto-lock timeout in seconds (0 = lock only on exit or manual lock).
     pub auto_lock_timeout_secs: u64,
     /// Remote synchronization endpoint settings (non-secret).
@@ -119,6 +121,7 @@ impl Default for LocalConfig {
             last_download_to: String::new(),
             log_dir: String::new(),
             skipped_version: String::new(),
+            check_updates: false,
             auto_lock_timeout_secs: 1800,
             sync: SyncConfig::default(),
         }

@@ -1445,8 +1445,10 @@ const NEWER: &str =
 fn new_version_banner_can_be_skipped() {
     let f = Fixture::new();
     let api = release_api(NEWER);
+    let mut cfg = Config::default();
+    cfg.settings.check_updates = true;
     let app = f
-        .app(Config::default())
+        .app(cfg)
         .with_update_api(api.clone())
         .with_update_check();
     let mut harness = harness(app);

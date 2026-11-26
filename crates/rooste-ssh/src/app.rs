@@ -692,6 +692,8 @@ impl RoosteApp {
             if controller.enabled {
                 // Keep plaintext profiles hidden until the vault is unlocked.
                 self.config.profiles.clear();
+                let guard = self.runtime.block_on(controller.store.lock());
+                self.config.settings.check_updates = guard.local_config().check_updates;
             }
             self.vault = Some(controller);
         }
@@ -1943,6 +1945,13 @@ impl RoosteApp {
 
     fn apply_settings(&mut self, settings: Settings) {
         crate::i18n::set_language(settings.language);
+        if let Some(ref vault) = self.vault
+            && vault.enabled
+        {
+            let mut guard = self.runtime.block_on(vault.store.lock());
+            guard.local_config_mut().check_updates = settings.check_updates;
+            let _ = guard.save_local_config();
+        }
         self.config.settings = settings;
         self.save_config();
         let settings = self.config.settings.clone();

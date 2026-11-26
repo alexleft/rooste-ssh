@@ -128,7 +128,7 @@ impl Default for Settings {
             last_download_to: String::new(),
             log_dir: String::new(),
             use_builtin_agent: false,
-            check_updates: true,
+            check_updates: false,
             skipped_version: String::new(),
             tmux_scrollback_capture: 1_000,
             tmux_pause_after_secs: 5,
